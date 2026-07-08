@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+nailsbyhuntrr.db
+*.db
+*.sqlite
+*.sqlite3
+.env

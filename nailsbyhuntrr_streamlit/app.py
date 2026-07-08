@@ -80,6 +80,7 @@ def init_db() -> None:
                 materials TEXT,
                 image_url TEXT,
                 image_urls TEXT,
+                model_file_path TEXT,
                 sku TEXT,
                 variation_1_name TEXT,
                 variation_1_values TEXT,
@@ -100,10 +101,12 @@ def init_db() -> None:
                 cost REAL NOT NULL DEFAULT 0,
                 quantity INTEGER NOT NULL DEFAULT 0,
                 reorder_level INTEGER NOT NULL DEFAULT 5,
+                print_time TEXT,
                 tags TEXT,
                 materials TEXT,
                 image_url TEXT,
                 image_urls TEXT,
+                model_file_path TEXT,
                 sku TEXT,
                 variation_1_name TEXT,
                 variation_1_values TEXT,
@@ -157,6 +160,7 @@ def init_db() -> None:
                 "materials": "TEXT",
                 "image_url": "TEXT",
                 "image_urls": "TEXT",
+                "model_file_path": "TEXT",
                 "sku": "TEXT",
                 "variation_1_name": "TEXT",
                 "variation_1_values": "TEXT",
@@ -167,10 +171,12 @@ def init_db() -> None:
                 "etsy_listing_id": "INTEGER",
                 "description": "TEXT",
                 "currency_code": "TEXT NOT NULL DEFAULT 'USD'",
+                "print_time": "TEXT",
                 "tags": "TEXT",
                 "materials": "TEXT",
                 "image_url": "TEXT",
                 "image_urls": "TEXT",
+                "model_file_path": "TEXT",
                 "sku": "TEXT",
                 "variation_1_name": "TEXT",
                 "variation_1_values": "TEXT",
@@ -232,6 +238,8 @@ def init_db() -> None:
             conn.execute(
                 "INSERT INTO app_settings (key, value) VALUES ('seeded_sample_data', '1')"
             )
+        ensure_bundled_filament_colors(conn)
+        ensure_bundled_keychains(conn)
 
 
 def seed_db(conn: sqlite3.Connection) -> None:
@@ -314,6 +322,108 @@ def seed_db(conn: sqlite3.Connection) -> None:
         """,
         sale_rows,
     )
+
+
+def ensure_bundled_filament_colors(conn: sqlite3.Connection) -> None:
+    colors = [
+        ("ZIRO Pastel Purple Matte PLA", "#BDA9F2", "matte PLA", 1, "filament"),
+        ("3DHoJor Matte Green PLA", "#9ED8A6", "matte PLA", 1, "filament"),
+        ("Polymaker Celestial Light Pink PLA", "#F4A8C6", "glitter PLA", 1, "filament"),
+        ("JAYO Pink PLA", "#F2A5C3", "PLA", 1, "filament"),
+        ("PLA+ Matte Ice Blue", "#BFEAF7", "matte PLA", 1, "filament"),
+        ("SUNLU PLA+ 2.0 White", "#F7F7F2", "PLA+", 1, "filament"),
+    ]
+    conn.executemany(
+        """
+        INSERT INTO colors (name, hex_code, finish, in_stock, catalog_type)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(name, catalog_type) DO UPDATE SET
+            hex_code = excluded.hex_code,
+            finish = excluded.finish,
+            in_stock = excluded.in_stock
+        """,
+        colors,
+    )
+
+
+def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
+    bundled = [
+        {
+            "name": "Oyasumi Bakura Keychain",
+            "description": "3D printed keychain design with matching thumbnail artwork.",
+            "style": "3MF design",
+            "color_id": None,
+            "price": 0.0,
+            "currency_code": "USD",
+            "cost": 0.0,
+            "quantity": 1,
+            "reorder_level": 0,
+            "print_time": None,
+            "tags": "keychain,3D print,3MF,kawaii",
+            "materials": None,
+            "image_url": "assets/keychains/oyasumi_bakura_keychain.png",
+            "image_urls": "assets/keychains/oyasumi_bakura_keychain.png",
+            "model_file_path": "assets/keychains/oyasumi_bakura_keychain.3mf",
+            "sku": None,
+            "variation_1_name": None,
+            "variation_1_values": None,
+            "variation_2_name": None,
+            "variation_2_values": None,
+        }
+    ]
+    for item in bundled:
+        existing = conn.execute(
+            "SELECT id FROM keychains WHERE name = ?",
+            (item["name"],),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE keychains
+                SET description = :description,
+                    style = :style,
+                    color_id = :color_id,
+                    price = :price,
+                    currency_code = :currency_code,
+                    cost = :cost,
+                    quantity = :quantity,
+                    reorder_level = :reorder_level,
+                    print_time = COALESCE(:print_time, print_time),
+                    tags = :tags,
+                    materials = :materials,
+                    image_url = :image_url,
+                    image_urls = :image_urls,
+                    model_file_path = :model_file_path,
+                    sku = :sku,
+                    variation_1_name = :variation_1_name,
+                    variation_1_values = :variation_1_values,
+                    variation_2_name = :variation_2_name,
+                    variation_2_values = :variation_2_values
+                WHERE id = :id
+                """,
+                {**item, "id": existing["id"]},
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO keychains
+                (
+                    name, description, style, color_id, price, currency_code,
+                    cost, quantity, reorder_level, tags, materials, image_url,
+                    print_time,
+                    image_urls, model_file_path, sku, variation_1_name,
+                    variation_1_values, variation_2_name, variation_2_values
+                )
+                VALUES (
+                    :name, :description, :style, :color_id, :price, :currency_code,
+                    :cost, :quantity, :reorder_level, :tags, :materials, :image_url,
+                    :print_time,
+                    :image_urls, :model_file_path, :sku, :variation_1_name,
+                    :variation_1_values, :variation_2_name, :variation_2_values
+                )
+                """,
+                item,
+            )
 
 
 def query_df(sql: str, params: tuple = ()) -> pd.DataFrame:
@@ -719,6 +829,12 @@ def restock(table: str, product_id: int, qty: int) -> None:
         conn.execute(f"UPDATE {table} SET quantity = quantity + ? WHERE id = ?", (qty, product_id))
 
 
+def update_keychain_print_time(product_id: int, print_time: str | None) -> None:
+    clean_time = print_time.strip() if print_time else None
+    with connect() as conn:
+        conn.execute("UPDATE keychains SET print_time = ? WHERE id = ?", (clean_time or None, product_id))
+
+
 def add_product(product_type: str, payload: dict) -> None:
     table = "press_on_nails" if product_type == "press_on_nails" else "keychains"
     with connect() as conn:
@@ -762,11 +878,11 @@ def add_product(product_type: str, payload: dict) -> None:
                 INSERT INTO keychains
                 (
                     name, description, style, color_id, price, currency_code,
-                    cost, quantity, reorder_level, tags, materials, image_url,
-                    image_urls, sku, variation_1_name, variation_1_values,
+                    cost, quantity, reorder_level, print_time, tags, materials, image_url,
+                    image_urls, model_file_path, sku, variation_1_name, variation_1_values,
                     variation_2_name, variation_2_values
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["name"],
@@ -778,10 +894,12 @@ def add_product(product_type: str, payload: dict) -> None:
                     payload["cost"],
                     payload["quantity"],
                     payload["reorder_level"],
+                    payload.get("print_time"),
                     payload.get("tags"),
                     payload.get("materials"),
                     payload.get("image_url"),
                     payload.get("image_urls"),
+                    payload.get("model_file_path"),
                     payload.get("sku"),
                     payload.get("variation_1_name"),
                     payload.get("variation_1_values"),
@@ -897,6 +1015,40 @@ def style_page() -> None:
             border-radius: 8px;
             padding: 0.85rem;
             margin-bottom: 0.7rem;
+        }}
+        .nail-grid-card {{
+            background: #ffffff;
+            border: 1px solid rgba(27, 27, 27, 0.08);
+            border-radius: 8px;
+            padding: 0.8rem;
+            margin-bottom: 0.85rem;
+            min-height: 150px;
+        }}
+        .nail-grid-card strong {{
+            display: block;
+            line-height: 1.22;
+            margin-bottom: 0.35rem;
+        }}
+        .nail-grid-card small {{
+            color: rgba(27, 27, 27, 0.68);
+        }}
+        .nail-grid-card p {{
+            color: rgba(27, 27, 27, 0.74);
+            font-size: 0.88rem;
+            line-height: 1.35;
+            margin: 0.55rem 0 0;
+        }}
+        .nail-image-placeholder {{
+            align-items: center;
+            background: #ffffff;
+            border: 1px dashed rgba(183, 110, 121, 0.32);
+            border-radius: 8px;
+            color: rgba(27, 27, 27, 0.48);
+            display: flex;
+            font-size: 0.9rem;
+            justify-content: center;
+            margin-bottom: 0.5rem;
+            min-height: 160px;
         }}
         .low {{
             border-color: rgba(210, 4, 45, 0.32);
@@ -1071,6 +1223,90 @@ def render_etsy_api() -> None:
                 st.error(str(exc))
 
 
+def render_inventory_export(table: str, products: pd.DataFrame) -> None:
+    export_cols = [
+        col
+        for col in [
+            "name",
+            "description",
+            "descriptor",
+            "color_name",
+            "price",
+            "currency_code",
+            "cost",
+            "quantity",
+            "reorder_level",
+            "print_time",
+            "tags",
+            "materials",
+            "image_url",
+            "model_file_path",
+            "sku",
+        ]
+        if col in products.columns
+    ]
+    st.download_button(
+        "Download inventory CSV",
+        products[export_cols].to_csv(index=False),
+        file_name=f"{table}_inventory.csv",
+        mime="text/csv",
+        width="stretch",
+    )
+
+
+def render_nails_grid(products: pd.DataFrame) -> None:
+    columns_per_row = 3
+    for start in range(0, len(products), columns_per_row):
+        cols = st.columns(columns_per_row)
+        for col, product in zip(cols, products.iloc[start : start + columns_per_row].itertuples()):
+            with col:
+                description = getattr(product, "description", None) or ""
+                image_url = getattr(product, "image_url", None)
+                display_image = image_url
+                if image_url and not str(image_url).startswith(("http://", "https://")):
+                    display_image = APP_DIR / str(image_url)
+                if display_image:
+                    st.image(display_image, use_container_width=True)
+                else:
+                    st.markdown('<div class="nail-image-placeholder">No image</div>', unsafe_allow_html=True)
+                st.markdown(
+                    f"""
+                    <div class="nail-grid-card">
+                        <strong>{html.escape(str(product.name))}</strong>
+                        <small>{html.escape(str(product.descriptor))} | {html.escape(str(product.color_name or 'No color'))}</small>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                listing_details = {
+                    "Tags": getattr(product, "tags", None),
+                    "Materials": getattr(product, "materials", None),
+                    "Variation 1": " - ".join(
+                        v
+                        for v in [
+                            getattr(product, "variation_1_name", None),
+                            getattr(product, "variation_1_values", None),
+                        ]
+                        if v
+                    ),
+                    "Variation 2": " - ".join(
+                        v
+                        for v in [
+                            getattr(product, "variation_2_name", None),
+                            getattr(product, "variation_2_values", None),
+                        ]
+                        if v
+                    ),
+                    "Images": getattr(product, "image_urls", None),
+                    "Description": description,
+                }
+                if any(listing_details.values()):
+                    with st.expander("Etsy details", expanded=False):
+                        for label, value in listing_details.items():
+                            if value:
+                                st.markdown(f"**{label}:** {value}")
+
+
 def render_inventory_table(product_type: str) -> None:
     table = "press_on_nails" if product_type == "press_on_nails" else "keychains"
     show_inventory_numbers = product_type != "press_on_nails"
@@ -1079,13 +1315,10 @@ def render_inventory_table(product_type: str) -> None:
         st.info("No products yet.")
         return
 
-    if show_inventory_numbers:
-        cost_value = float((products["quantity"] * products["cost"]).sum())
-        retail_value = float((products["quantity"] * products["price"]).sum())
-        cols = st.columns(3)
-        cols[0].metric("SKUs", f"{len(products):,.0f}")
-        cols[1].metric("Cost value", money(cost_value))
-        cols[2].metric("Retail value", money(retail_value))
+    if not show_inventory_numbers:
+        render_nails_grid(products)
+        render_inventory_export(table, products)
+        return
 
     for product in products.itertuples():
         low = product.quantity <= product.reorder_level
@@ -1094,9 +1327,15 @@ def render_inventory_table(product_type: str) -> None:
         sku_text = f" | SKU: {product.sku}" if show_inventory_numbers and getattr(product, "sku", None) else ""
         description = getattr(product, "description", None) or ""
         image_url = getattr(product, "image_url", None)
+        model_file_path = getattr(product, "model_file_path", None)
+        print_time = getattr(product, "print_time", None)
+        display_image = image_url
+        if image_url and not str(image_url).startswith(("http://", "https://")):
+            display_image = APP_DIR / str(image_url)
         card_meta = f"{product.descriptor} | {product.color_name or 'No color'}"
         if show_inventory_numbers:
             card_meta = f"{card_meta} | {money(product.price)} | {status}{sku_text}"
+            card_meta = f"{card_meta} | Print time: {print_time or 'Not set'}"
         st.markdown(
             f"""
             <div class="{card_class}">
@@ -1107,10 +1346,10 @@ def render_inventory_table(product_type: str) -> None:
             """,
             unsafe_allow_html=True,
         )
-        if image_url or description:
-            detail_cols = st.columns([1, 2]) if image_url else st.columns([1])
-            if image_url:
-                detail_cols[0].image(image_url, width=160)
+        if display_image or description:
+            detail_cols = st.columns([1, 2]) if display_image else st.columns([1])
+            if display_image:
+                detail_cols[0].image(display_image, width=160)
                 detail_cols[1].caption(description)
             else:
                 detail_cols[0].caption(description)
@@ -1130,7 +1369,31 @@ def render_inventory_table(product_type: str) -> None:
                 for label, value in listing_details.items():
                     if value:
                         st.markdown(f"**{label}:** {value}")
+        if model_file_path:
+            model_path = APP_DIR / model_file_path
+            if model_path.exists():
+                st.download_button(
+                    "Download 3MF",
+                    model_path.read_bytes(),
+                    file_name=model_path.name,
+                    mime="model/3mf",
+                    key=f"download_model_{table}_{product.id}",
+                    width="stretch",
+                )
+            else:
+                st.warning(f"Missing 3MF file: {model_file_path}")
         if show_inventory_numbers:
+            with st.expander(f"Print time for {product.name}", expanded=False):
+                edited_print_time = st.text_input(
+                    "Print time",
+                    value=print_time or "",
+                    placeholder="2h 35m",
+                    key=f"print_time_{table}_{product.id}",
+                )
+                if st.button("Save print time", key=f"btn_print_time_{table}_{product.id}", width="stretch"):
+                    update_keychain_print_time(int(product.id), edited_print_time)
+                    st.success("Print time saved.")
+                    st.rerun()
             with st.expander(f"Restock {product.name}", expanded=False):
                 qty = st.number_input("Units to add", min_value=1, max_value=999, value=10, key=f"restock_{table}_{product.id}")
                 if st.button("Add stock", key=f"btn_restock_{table}_{product.id}", width="stretch"):
@@ -1150,9 +1413,11 @@ def render_inventory_table(product_type: str) -> None:
             "cost",
             "quantity",
             "reorder_level",
+            "print_time",
             "tags",
             "materials",
             "image_url",
+            "model_file_path",
             "sku",
         ]
         if col in products.columns
@@ -1186,11 +1451,13 @@ def render_add_product(product_type: str) -> None:
                 cost = 0.0
                 quantity = 0
                 reorder = 1
+                print_time = ""
             else:
                 price = st.number_input("Etsy price", min_value=0.0, value=20.0, step=1.0, key=f"{product_type}_price")
                 cost = st.number_input("Cost to make", min_value=0.0, value=5.0, step=0.5, key=f"{product_type}_cost")
                 quantity = st.number_input("Quantity", min_value=0, value=10, step=1, key=f"{product_type}_quantity")
                 reorder = st.number_input("Reorder level", min_value=0, value=5, step=1, key=f"{product_type}_reorder")
+                print_time = st.text_input("Print time", placeholder="2h 35m", key=f"{product_type}_print_time")
             payload = {
                 "name": name.strip(),
                 "color_id": color_options[color_name],
@@ -1198,6 +1465,7 @@ def render_add_product(product_type: str) -> None:
                 "cost": float(cost),
                 "quantity": int(quantity),
                 "reorder_level": int(reorder),
+                "print_time": print_time.strip() if not is_nail and print_time.strip() else None,
             }
             if is_nail:
                 payload["shape"] = st.selectbox(
@@ -1377,37 +1645,6 @@ def render_reviews() -> None:
         cols[1].metric("Average rating", f"{reviews['rating'].mean():.1f}")
         cols[2].metric("5-star reviews", f"{int((reviews['rating'] == 5).sum()):,.0f}")
 
-    product_names = []
-    nails = get_products("press_on_nails")
-    keychains = get_products("keychains")
-    if not nails.empty:
-        product_names.extend(nails["name"].tolist())
-    if not keychains.empty:
-        product_names.extend(keychains["name"].tolist())
-    product_names = sorted(set(product_names))
-
-    with st.expander("Add review", expanded=reviews.empty):
-        with st.form("review_form", clear_on_submit=True):
-            review_date = st.date_input("Review date", value=date.today(), key="review_date")
-            if product_names:
-                selected_product = st.selectbox("Product", ["Type manually", *product_names], key="review_product_select")
-                manual_product = st.text_input("Product name", key="review_product_manual") if selected_product == "Type manually" else ""
-                product_name = manual_product.strip() if selected_product == "Type manually" else selected_product
-            else:
-                product_name = st.text_input("Product name", key="review_product_name").strip()
-            rating = st.slider("Rating", min_value=1, max_value=5, value=5, key="review_rating")
-            customer_name = st.text_input("Customer name", key="review_customer")
-            review_text = st.text_area("Review text", key="review_text")
-            notes = st.text_area("Private notes", key="review_notes")
-            submitted = st.form_submit_button("Save review", width="stretch")
-        if submitted:
-            if not product_name:
-                st.warning("Add a product name first.")
-            else:
-                add_review(review_date, product_name, int(rating), customer_name.strip(), review_text.strip(), notes.strip())
-                st.success("Review saved.")
-                st.rerun()
-
     if reviews.empty:
         st.info("No reviews added yet.")
         return
@@ -1461,7 +1698,7 @@ def render_catalog(catalog_type: str, title: str) -> None:
                 finish_options = ["glossy", "matte", "chrome", "glitter", "cat eye", "jelly"]
                 finish_label = "Finish"
             else:
-                finish_options = ["PLA", "PETG", "TPU", "ABS", "silk PLA", "matte PLA", "glitter PLA"]
+                finish_options = ["PLA", "PLA+", "PETG", "TPU", "ABS", "silk PLA", "matte PLA", "glitter PLA"]
                 finish_label = "Material / finish"
             finish = st.selectbox(finish_label, finish_options, key=f"{catalog_type}_finish")
             in_stock = st.checkbox("In stock", value=True, key=f"{catalog_type}_in_stock")
