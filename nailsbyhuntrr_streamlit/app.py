@@ -676,9 +676,17 @@ def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
             "cost": 0.0,
             "quantity": 1,
             "reorder_level": 0,
-            "print_time": None,
+            "print_time": "Plate 1: 5h33m\nPlate 2: 39m17s\nPlate 3: 3h41m\nPlate 4: 18m41s",
             "tags": "keychain,3D print,3MF,kawaii,Mamegoma",
-            "materials": None,
+            "materials": (
+                "Filaments: 1 white, 2 black, 3 pink, 4 blue, 5 pale yellow | total 10.81 m / 32.77 g | cost 0.82\n"
+                "Plate 1: total print time 5h33m\n"
+                "Plate 2: total print time 39m17s\n"
+                "Plate 3: total print time 3h41m\n"
+                "Plate 4: total print time 18m41s\n"
+                "Total print time: 10h12m\n"
+                "Total filament: model 2.02 m / 6.13 g, purged 5.49 m / 16.64 g, tower 3.30 m / 9.99 g"
+            ),
             "image_url": "assets/keychains/mamegoma_baby_keychain_set.jpg",
             "image_urls": "assets/keychains/mamegoma_baby_keychain_set.jpg",
             "model_file_path": "assets/keychains/mamegoma_baby_keychain_set.3mf",
@@ -706,9 +714,9 @@ def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
                     cost = :cost,
                     quantity = :quantity,
                     reorder_level = :reorder_level,
-                    print_time = COALESCE(print_time, :print_time),
+                    print_time = COALESCE(NULLIF(print_time, ''), :print_time),
                     tags = :tags,
-                    materials = COALESCE(materials, :materials),
+                    materials = COALESCE(NULLIF(materials, ''), :materials),
                     image_url = :image_url,
                     image_urls = :image_urls,
                     model_file_path = :model_file_path,
@@ -1599,17 +1607,19 @@ def clean_multiline_lines(value: str | None) -> list[str]:
     return [line.strip() for line in str(value).splitlines() if line.strip()]
 
 
-def parse_print_time_minutes(line: str) -> int | None:
+def parse_print_time_seconds(line: str) -> int | None:
     time_text = str(line).lower().split(":", 1)[-1]
     hours = sum(int(match.group(1)) for match in re.finditer(r"(\d+)\s*h", time_text))
     minutes = sum(int(match.group(1)) for match in re.finditer(r"(\d+)\s*m", time_text))
-    if not hours and not minutes:
+    seconds = sum(int(match.group(1)) for match in re.finditer(r"(\d+)\s*s", time_text))
+    if not hours and not minutes and not seconds:
         return None
-    return hours * 60 + minutes
+    return hours * 3600 + minutes * 60 + seconds
 
 
-def format_print_time_total(total_minutes: int) -> str:
-    hours, minutes = divmod(total_minutes, 60)
+def format_print_time_total(total_seconds: int) -> str:
+    rounded_minutes = int(round(total_seconds / 60))
+    hours, minutes = divmod(rounded_minutes, 60)
     if hours and minutes:
         return f"{hours}h{minutes:02d}m"
     if hours:
@@ -1618,11 +1628,11 @@ def format_print_time_total(total_minutes: int) -> str:
 
 
 def total_print_time_summary(time_lines: list[str]) -> str | None:
-    durations = [parse_print_time_minutes(line) for line in time_lines]
-    total_minutes = sum(duration for duration in durations if duration is not None)
-    if total_minutes <= 0:
+    durations = [parse_print_time_seconds(line) for line in time_lines]
+    total_seconds = sum(duration for duration in durations if duration is not None)
+    if total_seconds <= 0:
         return None
-    return format_print_time_total(total_minutes)
+    return format_print_time_total(total_seconds)
 
 
 def render_keychain_production_panel(print_time: str | None, materials: str | None) -> None:
