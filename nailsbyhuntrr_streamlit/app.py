@@ -679,13 +679,11 @@ def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
             "print_time": "Plate 1: 5h33m\nPlate 2: 39m17s\nPlate 3: 3h41m\nPlate 4: 18m41s",
             "tags": "keychain,3D print,3MF,kawaii,Mamegoma",
             "materials": (
-                "Filaments: 1 white, 2 black, 3 pink, 4 blue, 5 pale yellow | total 10.81 m / 32.77 g | cost 0.82\n"
-                "Plate 1: total print time 5h33m\n"
-                "Plate 2: total print time 39m17s\n"
-                "Plate 3: total print time 3h41m\n"
-                "Plate 4: total print time 18m41s\n"
-                "Total print time: 10h12m\n"
-                "Total filament: model 2.02 m / 6.13 g, purged 5.49 m / 16.64 g, tower 3.30 m / 9.99 g"
+                "Plate 1: filaments 1 white, 3 pink, 4 blue, 5 pale yellow | total 6.23 m / 18.88 g | 69 changes | cost 0.47\n"
+                "Plate 2: filament 2 black | total 0.39 m / 1.17 g | 0 changes | cost 0.02\n"
+                "Plate 3: filaments 1 white, 3 pink, 4 blue, 5 pale yellow | total 4.20 m / 12.72 g | 50 changes | cost 0.32\n"
+                "Plate 4: filament 2 black | total 0.10 m / 0.31 g | 0 changes | cost 0.01\n"
+                "Total filament: 10.92 m / 33.08 g | total material cost 0.82"
             ),
             "image_url": "assets/keychains/mamegoma_baby_keychain_set.jpg",
             "image_urls": "assets/keychains/mamegoma_baby_keychain_set.jpg",
@@ -714,9 +712,9 @@ def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
                     cost = :cost,
                     quantity = :quantity,
                     reorder_level = :reorder_level,
-                    print_time = COALESCE(NULLIF(print_time, ''), :print_time),
+                    print_time = :print_time,
                     tags = :tags,
-                    materials = COALESCE(NULLIF(materials, ''), :materials),
+                    materials = :materials,
                     image_url = :image_url,
                     image_urls = :image_urls,
                     model_file_path = :model_file_path,
@@ -2029,6 +2027,28 @@ def render_overview() -> None:
     st.plotly_chart(fig, width="stretch")
 
 
+def render_about_me() -> None:
+    st.subheader("About Me")
+    st.markdown(
+        """
+        **NailsByHuntrr** is my handmade Etsy shop for custom press-on nails,
+        cute 3D printed keychains, gel polish swatches, and production planning.
+
+        This dashboard keeps my shop information in one place so I can track
+        orders, revenue, reviews, nail sets, keychain files, polish colors, and
+        the printer details I need before making each product.
+        """
+    )
+
+    shop_stats = load_shop_stats()
+    if shop_stats:
+        stat_cols = st.columns(4)
+        stat_cols[0].metric("Sales", f"{int(shop_stats.get('sales', 0)):,.0f}")
+        stat_cols[1].metric("Orders", f"{int(shop_stats.get('orders', 0)):,.0f}")
+        stat_cols[2].metric("Favorites", f"{int(shop_stats.get('favorites', 0)):,.0f}")
+        stat_cols[3].metric("Revenue", money(float(shop_stats.get("revenue", 0))))
+
+
 def render_etsy_api() -> None:
     st.subheader("Etsy API")
     st.caption("Connects this local dashboard to your own Etsy shop through Etsy Open API v3.")
@@ -2866,6 +2886,8 @@ def render_gel_polish_swatch_chart(colors: pd.DataFrame) -> None:
 def render_catalog(catalog_type: str, title: str) -> None:
     colors = get_colors(catalog_type)
     st.subheader(title)
+    visible_colors = colors
+
     if catalog_type == "gel_polish" and not colors.empty:
         out_colors = colors[colors["in_stock"] == 0]
         if not out_colors.empty:
@@ -2886,10 +2908,44 @@ def render_catalog(catalog_type: str, title: str) -> None:
                 )
 
     if catalog_type == "gel_polish" and not colors.empty:
-        with st.expander("Open large swatch chart", expanded=False):
-            render_gel_polish_swatch_chart(colors)
+        finish_options = sorted(
+            {
+                str(finish).strip()
+                for finish in colors["finish"].dropna().tolist()
+                if str(finish).strip()
+            },
+            key=str.lower,
+        )
+        selected_finishes = st.multiselect(
+            "Polish type",
+            finish_options,
+            placeholder="Show all polish types",
+            key="gel_polish_finish_filter",
+        )
+        if selected_finishes:
+            visible_colors = colors[colors["finish"].isin(selected_finishes)]
 
-    for color in colors.itertuples():
+        with st.expander("Open large swatch chart", expanded=False):
+            render_gel_polish_swatch_chart(visible_colors)
+    elif catalog_type == "filament" and not colors.empty:
+        finish_options = sorted(
+            {
+                str(finish).strip()
+                for finish in colors["finish"].dropna().tolist()
+                if str(finish).strip()
+            },
+            key=str.lower,
+        )
+        selected_finishes = st.multiselect(
+            "PLA type",
+            finish_options,
+            placeholder="Show all filament types",
+            key="filament_finish_filter",
+        )
+        if selected_finishes:
+            visible_colors = colors[colors["finish"].isin(selected_finishes)]
+
+    for color in visible_colors.itertuples():
         in_stock = bool(color.in_stock)
         status = "In stock" if in_stock else "OUT"
         brand = getattr(color, "brand", None)
@@ -2918,6 +2974,8 @@ def render_catalog(catalog_type: str, title: str) -> None:
                 st.rerun()
     if colors.empty:
         st.info("No colors added yet.")
+    elif visible_colors.empty:
+        st.info("No colors match that polish type filter.")
 
     with st.expander("Add color", expanded=False):
         with st.form(f"{catalog_type}_color_form", clear_on_submit=True):
@@ -2925,7 +2983,17 @@ def render_catalog(catalog_type: str, title: str) -> None:
             name = st.text_input(name_label, key=f"{catalog_type}_color_name")
             hex_code = st.text_input("Hex code", value="#FFB7D5", key=f"{catalog_type}_hex")
             if catalog_type == "gel_polish":
-                finish_options = ["gel", "regular lacquer", "glossy", "matte", "chrome", "glitter", "cat eye", "jelly"]
+                finish_options = [
+                    "gel",
+                    "regular lacquer",
+                    "glossy",
+                    "matte",
+                    "chrome",
+                    "glitter",
+                    "cat eye",
+                    "jelly",
+                    "builder gel",
+                ]
                 finish_label = "Type of polish"
             else:
                 finish_options = ["PLA", "PLA+", "PETG", "TPU", "ABS", "silk PLA", "matte PLA", "glitter PLA"]
@@ -2963,6 +3031,7 @@ def main() -> None:
     render_header()
     (
         overview,
+        about_me,
         nails,
         keychains,
         gel_polish,
@@ -2974,6 +3043,7 @@ def main() -> None:
     ) = st.tabs(
         [
             "Overview",
+            "About Me",
             "Nails",
             "Keychains",
             "Gel Polish Catalog",
@@ -2986,6 +3056,8 @@ def main() -> None:
     )
     with overview:
         render_overview()
+    with about_me:
+        render_about_me()
     with nails:
         render_product_page("press_on_nails", "Nails")
     with keychains:
