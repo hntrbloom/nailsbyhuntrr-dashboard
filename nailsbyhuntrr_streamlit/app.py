@@ -2652,6 +2652,36 @@ def render_orders() -> None:
     cols[2].metric("Units", f"{summary['units']:,.0f}")
     cols[3].metric("Avg. order", money(summary["avg_order"]))
 
+    chart_orders = orders.sort_values("sale_date").copy()
+    daily_orders = chart_orders.groupby("sale_date", as_index=False).agg(
+        revenue=("revenue", "sum"),
+        orders=("id", "count"),
+    )
+    daily_orders["cumulative_revenue"] = daily_orders["revenue"].cumsum()
+    chart_col, cumulative_col = st.columns([1.25, 1])
+    with chart_col:
+        st.subheader("Sales over time")
+        fig = px.bar(
+            daily_orders,
+            x="sale_date",
+            y="revenue",
+            hover_data={"orders": True, "sale_date": "|%b %d, %Y", "revenue": ":$,.2f"},
+            color_discrete_sequence=[BRAND_PRIMARY],
+        )
+        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=320, yaxis_title=None, xaxis_title=None)
+        st.plotly_chart(fig, width="stretch")
+    with cumulative_col:
+        st.subheader("Cumulative revenue")
+        fig = px.line(
+            daily_orders,
+            x="sale_date",
+            y="cumulative_revenue",
+            markers=True,
+            color_discrete_sequence=[BRAND_EMERALD],
+        )
+        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=320, yaxis_title=None, xaxis_title=None)
+        st.plotly_chart(fig, width="stretch")
+
     order_view = orders.copy()
     if "customer_name" not in order_view.columns:
         order_view["customer_name"] = ""
