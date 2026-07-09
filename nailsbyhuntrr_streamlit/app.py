@@ -665,6 +665,28 @@ def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
             "variation_1_values": None,
             "variation_2_name": None,
             "variation_2_values": None,
+        },
+        {
+            "name": "Mamegoma Baby Keychain Set",
+            "description": "3D printed Baby Mamegoma keychain set with matching thumbnail artwork.",
+            "style": "3MF design",
+            "color_id": None,
+            "price": 0.0,
+            "currency_code": "USD",
+            "cost": 0.0,
+            "quantity": 1,
+            "reorder_level": 0,
+            "print_time": None,
+            "tags": "keychain,3D print,3MF,kawaii,Mamegoma",
+            "materials": None,
+            "image_url": "assets/keychains/mamegoma_baby_keychain_set.jpg",
+            "image_urls": "assets/keychains/mamegoma_baby_keychain_set.jpg",
+            "model_file_path": "assets/keychains/mamegoma_baby_keychain_set.3mf",
+            "sku": None,
+            "variation_1_name": None,
+            "variation_1_values": None,
+            "variation_2_name": None,
+            "variation_2_values": None,
         }
     ]
     for item in bundled:
