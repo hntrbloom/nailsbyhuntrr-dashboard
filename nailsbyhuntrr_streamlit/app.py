@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import requests
@@ -1273,6 +1274,184 @@ def summarize_sales(sales: pd.DataFrame) -> dict[str, float]:
     }
 
 
+def build_daily_revenue_features(sales: pd.DataFrame) -> pd.DataFrame:
+    if sales.empty:
+        return pd.DataFrame()
+    history = sales.copy()
+    history["sale_date"] = pd.to_datetime(history["sale_date"])
+    daily = (
+        history.groupby(history["sale_date"].dt.date)
+        .agg(revenue=("revenue", "sum"), units=("quantity", "sum"), orders=("id", "count"))
+        .reset_index()
+        .rename(columns={"sale_date": "date"})
+    )
+    daily["date"] = pd.to_datetime(daily["date"])
+    full_dates = pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")
+    daily = daily.set_index("date").reindex(full_dates, fill_value=0).rename_axis("date").reset_index()
+    daily["day_index"] = (daily["date"] - daily["date"].min()).dt.days
+    daily["day_of_week"] = daily["date"].dt.dayofweek
+    daily["month"] = daily["date"].dt.month
+    daily["is_weekend"] = daily["day_of_week"].isin([5, 6]).astype(int)
+    daily["rolling_7"] = daily["revenue"].shift(1).rolling(7, min_periods=1).mean().fillna(0)
+    daily["rolling_14"] = daily["revenue"].shift(1).rolling(14, min_periods=1).mean().fillna(0)
+    daily["lag_1"] = daily["revenue"].shift(1).fillna(0)
+    daily["lag_7"] = daily["revenue"].shift(7).fillna(0)
+    return daily
+
+
+def linear_regression_fit_predict(
+    frame: pd.DataFrame,
+    feature_cols: list[str],
+    target_col: str = "revenue",
+    test_ratio: float = 0.25,
+) -> dict:
+    if len(frame) < 8:
+        return {"ready": False, "reason": "Need at least 8 days of sales history for train/test scoring."}
+    split_index = max(1, min(len(frame) - 1, int(len(frame) * (1 - test_ratio))))
+    train = frame.iloc[:split_index].copy()
+    test = frame.iloc[split_index:].copy()
+    if train[target_col].nunique() <= 1:
+        return {"ready": False, "reason": "Need more variation in daily revenue before a model score is useful."}
+
+    x_train = np.column_stack([np.ones(len(train)), train[feature_cols].to_numpy(dtype=float)])
+    y_train = train[target_col].to_numpy(dtype=float)
+    coefficients = np.linalg.lstsq(x_train, y_train, rcond=None)[0]
+
+    x_test = np.column_stack([np.ones(len(test)), test[feature_cols].to_numpy(dtype=float)])
+    y_test = test[target_col].to_numpy(dtype=float)
+    predictions = np.maximum(0, x_test @ coefficients)
+    baseline_value = float(y_train.mean())
+    baseline_predictions = np.full(len(y_test), baseline_value)
+
+    mae = float(np.mean(np.abs(y_test - predictions)))
+    baseline_mae = float(np.mean(np.abs(y_test - baseline_predictions)))
+    total_variance = float(np.sum((y_test - y_test.mean()) ** 2))
+    r2 = 0.0 if total_variance == 0 else float(1 - np.sum((y_test - predictions) ** 2) / total_variance)
+    scored = test[["date", target_col]].copy()
+    scored["prediction"] = predictions
+    scored["baseline"] = baseline_predictions
+    return {
+        "ready": True,
+        "coefficients": coefficients,
+        "feature_cols": feature_cols,
+        "train_rows": len(train),
+        "test_rows": len(test),
+        "mae": mae,
+        "baseline_mae": baseline_mae,
+        "r2": r2,
+        "scored": scored,
+    }
+
+
+def forecast_daily_revenue(features: pd.DataFrame, model: dict, days: int) -> pd.DataFrame:
+    future_rows = []
+    working = features[["date", "revenue", "units", "orders"]].copy()
+    start_date = working["date"].max()
+    coefficients = model["coefficients"]
+    feature_cols = model["feature_cols"]
+    avg_units = float(working["units"].tail(14).mean()) if not working.empty else 0
+    avg_orders = float(working["orders"].tail(14).mean()) if not working.empty else 0
+
+    for offset in range(1, days + 1):
+        future_date = start_date + timedelta(days=offset)
+        row = {
+            "date": future_date,
+            "revenue": 0.0,
+            "units": avg_units,
+            "orders": avg_orders,
+        }
+        temp = pd.concat([working, pd.DataFrame([row])], ignore_index=True)
+        revenue_history = temp["revenue"].iloc[:-1]
+        engineered = {
+            "day_index": int((future_date - working["date"].min()).days),
+            "day_of_week": int(future_date.dayofweek),
+            "month": int(future_date.month),
+            "is_weekend": int(future_date.dayofweek in [5, 6]),
+            "rolling_7": float(revenue_history.tail(7).mean()) if len(revenue_history) else 0,
+            "rolling_14": float(revenue_history.tail(14).mean()) if len(revenue_history) else 0,
+            "lag_1": float(revenue_history.iloc[-1]) if len(revenue_history) else 0,
+            "lag_7": float(revenue_history.iloc[-7]) if len(revenue_history) >= 7 else 0,
+            "units": avg_units,
+            "orders": avg_orders,
+        }
+        x_future = np.array([1.0] + [float(engineered[col]) for col in feature_cols])
+        prediction = max(0.0, float(x_future @ coefficients))
+        row["revenue"] = prediction
+        working = pd.concat([working, pd.DataFrame([row])], ignore_index=True)
+        future_rows.append({"date": future_date, "forecast_revenue": prediction})
+    return pd.DataFrame(future_rows)
+
+
+def inventory_restock_risk() -> pd.DataFrame:
+    sales = get_sales()
+    products = []
+    for product_type, label in [("press_on_nails", "Press-on nails"), ("keychains", "Keychains")]:
+        product_frame = get_products(product_type)
+        if product_frame.empty:
+            continue
+        product_frame = product_frame.copy()
+        product_frame["product_type"] = product_type
+        product_frame["product_line"] = label
+        products.append(product_frame)
+    if not products:
+        return pd.DataFrame()
+    inventory = pd.concat(products, ignore_index=True)
+    if sales.empty:
+        inventory["recent_units_sold"] = 0
+    else:
+        recent_start = date.today() - timedelta(days=30)
+        recent_sales = sales[
+            (sales["product_type"].isin(["press_on_nails", "keychains"]))
+            & (pd.to_datetime(sales["sale_date"]).dt.date >= recent_start)
+        ]
+        recent_units = (
+            recent_sales.groupby(["product_type", "product_id"], as_index=False)["quantity"].sum()
+            if not recent_sales.empty
+            else pd.DataFrame(columns=["product_type", "product_id", "quantity"])
+        )
+        recent_units = recent_units.rename(columns={"quantity": "recent_units_sold"})
+        inventory = inventory.merge(
+            recent_units,
+            how="left",
+            left_on=["product_type", "id"],
+            right_on=["product_type", "product_id"],
+        )
+        inventory["recent_units_sold"] = inventory["recent_units_sold"].fillna(0)
+
+    inventory["daily_velocity"] = inventory["recent_units_sold"] / 30
+    inventory["days_until_stockout"] = np.inf
+    selling_mask = inventory["daily_velocity"] > 0
+    if selling_mask.any():
+        inventory.loc[selling_mask, "days_until_stockout"] = (
+            inventory.loc[selling_mask, "quantity"] / inventory.loc[selling_mask, "daily_velocity"]
+        )
+    inventory["risk_score"] = (
+        (inventory["quantity"] <= inventory["reorder_level"]).astype(int) * 2
+        + (inventory["days_until_stockout"] <= 14).astype(int)
+        + ((inventory["daily_velocity"] > 0) & (inventory["quantity"] <= inventory["reorder_level"] + 2)).astype(int)
+    )
+    inventory["risk"] = np.select(
+        [inventory["risk_score"] >= 3, inventory["risk_score"] >= 1],
+        ["High", "Medium"],
+        default="Low",
+    )
+    inventory["risk_rank"] = inventory["risk"].map({"High": 0, "Medium": 1, "Low": 2})
+    inventory["days_until_stockout"] = inventory["days_until_stockout"].replace(np.inf, np.nan)
+    return inventory[
+        [
+            "product_line",
+            "name",
+            "quantity",
+            "reorder_level",
+            "recent_units_sold",
+            "daily_velocity",
+            "days_until_stockout",
+            "risk",
+            "risk_rank",
+        ]
+    ].sort_values(["risk_rank", "days_until_stockout", "quantity"], ascending=[True, True, True]).drop(columns=["risk_rank"])
+
+
 def low_stock_df() -> pd.DataFrame:
     nails = get_products("press_on_nails").assign(product_line="Press-on nails")
     keys = get_products("keychains").assign(product_line="Keychains")
@@ -2305,6 +2484,106 @@ def render_revenue() -> None:
     )
 
 
+def render_forecast() -> None:
+    st.subheader("Revenue forecast")
+    sales = get_sales()
+    if sales.empty:
+        st.info("Add sales or manual revenue before training a forecast.")
+        return
+
+    features = build_daily_revenue_features(sales)
+    if features.empty:
+        st.info("No daily revenue history found yet.")
+        return
+
+    feature_cols = [
+        "day_index",
+        "day_of_week",
+        "month",
+        "is_weekend",
+        "rolling_7",
+        "rolling_14",
+        "lag_1",
+        "lag_7",
+        "units",
+        "orders",
+    ]
+    forecast_days = st.slider("Forecast days", min_value=7, max_value=90, value=30, step=7)
+    model = linear_regression_fit_predict(features, feature_cols)
+
+    st.markdown("**Feature engineering from sales history**")
+    feature_cols_display = st.columns(4)
+    feature_cols_display[0].metric("History days", f"{len(features):,.0f}")
+    feature_cols_display[1].metric("Feature count", f"{len(feature_cols):,.0f}")
+    feature_cols_display[2].metric("Total revenue", money(float(features["revenue"].sum())))
+    feature_cols_display[3].metric("Avg daily revenue", money(float(features["revenue"].mean())))
+    st.caption("Features include calendar timing, lagged revenue, rolling averages, units sold, and order count.")
+
+    if not model["ready"]:
+        st.info(model["reason"])
+    else:
+        st.markdown("**Linear regression train/test score**")
+        metric_cols = st.columns(5)
+        metric_cols[0].metric("Train days", f"{model['train_rows']:,.0f}")
+        metric_cols[1].metric("Test days", f"{model['test_rows']:,.0f}")
+        metric_cols[2].metric("MAE", money(model["mae"]))
+        metric_cols[3].metric("Baseline MAE", money(model["baseline_mae"]))
+        metric_cols[4].metric("R² score", f"{model['r2']:.2f}")
+
+        scored = model["scored"].copy()
+        scored["date"] = pd.to_datetime(scored["date"])
+        scored_long = scored.melt(
+            id_vars="date",
+            value_vars=["revenue", "prediction", "baseline"],
+            var_name="series",
+            value_name="daily_revenue",
+        )
+        score_fig = px.line(
+            scored_long,
+            x="date",
+            y="daily_revenue",
+            color="series",
+            color_discrete_sequence=[BRAND_PRIMARY, BRAND_EMERALD, BRAND_LAVENDER],
+        )
+        score_fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=300, yaxis_title=None, xaxis_title=None)
+        st.plotly_chart(score_fig, width="stretch")
+
+        forecast = forecast_daily_revenue(features, model, forecast_days)
+        forecast_total = float(forecast["forecast_revenue"].sum()) if not forecast.empty else 0
+        st.markdown("**Future revenue forecast**")
+        forecast_cols = st.columns(3)
+        forecast_cols[0].metric("Forecast window", f"{forecast_days} days")
+        forecast_cols[1].metric("Forecast revenue", money(forecast_total))
+        forecast_cols[2].metric("Avg forecast day", money(forecast_total / forecast_days if forecast_days else 0))
+        forecast_fig = px.bar(forecast, x="date", y="forecast_revenue", color_discrete_sequence=[BRAND_PRIMARY])
+        forecast_fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=300, yaxis_title=None, xaxis_title=None)
+        st.plotly_chart(forecast_fig, width="stretch")
+
+    st.subheader("Inventory restock risk classifier")
+    risk = inventory_restock_risk()
+    if risk.empty:
+        st.info("Add products before checking restock risk.")
+        return
+    risk_view = risk.copy()
+    risk_view["daily_velocity"] = risk_view["daily_velocity"].map(lambda value: f"{value:.2f}")
+    risk_view["days_until_stockout"] = risk_view["days_until_stockout"].map(
+        lambda value: "No recent sales" if pd.isna(value) else f"{value:.0f} days"
+    )
+    risk_view = risk_view.rename(
+        columns={
+            "product_line": "Product line",
+            "name": "Product",
+            "quantity": "Qty",
+            "reorder_level": "Reorder at",
+            "recent_units_sold": "Sold last 30 days",
+            "daily_velocity": "Units/day",
+            "days_until_stockout": "Stockout estimate",
+            "risk": "Risk",
+        }
+    )
+    st.dataframe(risk_view, hide_index=True, width="stretch")
+
+
 def render_sale_entry() -> None:
     st.subheader("Log Etsy sale")
     kind = st.segmented_control(
@@ -2519,6 +2798,7 @@ def main() -> None:
         gel_polish,
         filament,
         revenue,
+        forecast,
         reviews,
         etsy_api,
     ) = st.tabs(
@@ -2529,6 +2809,7 @@ def main() -> None:
             "Gel Polish Catalog",
             "3D Filament Colors",
             "Revenue",
+            "Forecast",
             "Reviews",
             "Etsy API",
         ]
@@ -2545,6 +2826,8 @@ def main() -> None:
         render_catalog("filament", "3D Filament Colors")
     with revenue:
         render_revenue()
+    with forecast:
+        render_forecast()
     with reviews:
         render_reviews()
     with etsy_api:

@@ -2,6 +2,12 @@
 
 Phone-friendly Streamlit dashboard for managing Etsy inventory, colors, sales, and revenue.
 
+## ML forecasting features
+
+The Forecast tab builds practical features from sales history, including calendar fields, lagged revenue, rolling revenue averages, units sold, and order count. It trains a lightweight linear regression revenue model with a chronological train/test split, then reports MAE, baseline MAE, and R² score.
+
+The same tab includes a future daily revenue forecast and an inventory restock risk classifier. The classifier combines current quantity, reorder level, recent units sold, and sales velocity to flag products as Low, Medium, or High restock risk.
+
 ## Run it
 
 ```powershell
@@ -26,7 +32,7 @@ The app creates `nailsbyhuntrr.db` in this folder and seeds it with sample nails
 4. In Streamlit Community Cloud, choose the GitHub repository and set the main file path to:
 
 ```text
-app.py
+nailsbyhuntrr_streamlit/app.py
 ```
 
 The deployed app will create its own empty SQLite database. For long-term production use, move the data to a hosted database because Streamlit Community Cloud storage can reset when the app rebuilds.
