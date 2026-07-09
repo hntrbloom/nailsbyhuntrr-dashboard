@@ -1845,6 +1845,29 @@ def color_shade_sort_key(hex_code: str) -> tuple[float, float, float, float]:
     return (1, hue, saturation, value)
 
 
+def clean_display_value(value: object) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return "" if text.lower() == "nan" else text
+
+
+def polish_display_name_and_swatch(name: object, swatch_id: object) -> tuple[str, str]:
+    display_name = clean_display_value(name)
+    display_swatch = clean_display_value(swatch_id)
+    match = re.match(r"^#?(\d{1,3})[\s\-:]+(.+)$", display_name)
+    if match:
+        if not display_swatch:
+            display_swatch = match.group(1).zfill(2)
+        display_name = match.group(2).strip()
+    return display_name, display_swatch
+
+
 def style_page() -> None:
     st.markdown(
         f"""
@@ -3170,7 +3193,7 @@ def render_gel_polish_swatch_chart(colors: pd.DataFrame) -> None:
         list(colors.itertuples()),
         key=lambda color: (
             color_shade_sort_key(color.hex_code),
-            str(getattr(color, "swatch_id", "") or ""),
+            polish_display_name_and_swatch(color.name, getattr(color, "swatch_id", None))[1],
             str(color.name).lower(),
         ),
     )
@@ -3184,10 +3207,9 @@ def render_gel_polish_swatch_chart(colors: pd.DataFrame) -> None:
                 hex_code = str(color.hex_code)
                 if not hex_code.startswith("#"):
                     hex_code = f"#{hex_code}"
-                swatch_id = getattr(color, "swatch_id", None)
-                name = f"#{swatch_id} {color.name}" if swatch_id else str(color.name)
-                brand = getattr(color, "brand", None)
-                finish = getattr(color, "finish", None)
+                name, swatch_id = polish_display_name_and_swatch(color.name, getattr(color, "swatch_id", None))
+                brand = clean_display_value(getattr(color, "brand", None))
+                finish = clean_display_value(getattr(color, "finish", None))
                 stock = "OUT" if not bool(color.in_stock) else "In stock"
                 st.color_picker(
                     f"Swatch {color.id}",
@@ -3198,10 +3220,12 @@ def render_gel_polish_swatch_chart(colors: pd.DataFrame) -> None:
                 )
                 st.markdown(f"**{name}**")
                 details = [hex_code]
+                if swatch_id:
+                    details.append(f"#{swatch_id}")
                 if brand:
-                    details.append(str(brand))
+                    details.append(brand)
                 if finish:
-                    details.append(str(finish))
+                    details.append(finish)
                 details.append(stock)
                 st.caption(" | ".join(details))
 
@@ -3216,15 +3240,15 @@ def render_catalog(catalog_type: str, title: str) -> None:
         if not out_colors.empty:
             st.subheader("Reorder ASAP")
             for color in out_colors.itertuples():
-                brand = getattr(color, "brand", None)
+                name, swatch_id = polish_display_name_and_swatch(color.name, getattr(color, "swatch_id", None))
+                brand = clean_display_value(getattr(color, "brand", None))
                 brand_text = f" | {brand}" if brand else ""
-                swatch_id = getattr(color, "swatch_id", None)
-                swatch_text = f" | Swatch {swatch_id}" if swatch_id else ""
+                swatch_text = f" | #{swatch_id}" if swatch_id else ""
                 st.markdown(
                     f"""
                     <div class="stock-card low">
-                        <strong><span class="swatch" style="background:{color.hex_code}"></span>{color.name}</strong><br>
-                        <small>{color.hex_code} | {color.finish}{brand_text}{swatch_text}</small>
+                        <strong><span class="swatch" style="background:{color.hex_code}"></span>{name}</strong><br>
+                        <small>{color.hex_code}{swatch_text} | {color.finish}{brand_text}</small>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -3271,20 +3295,21 @@ def render_catalog(catalog_type: str, title: str) -> None:
     for color in visible_colors.itertuples():
         in_stock = bool(color.in_stock)
         status = "In stock" if in_stock else "OUT"
-        brand = getattr(color, "brand", None)
-        swatch_id = getattr(color, "swatch_id", None)
-        details = [color.hex_code, color.finish, status]
+        name, swatch_id = polish_display_name_and_swatch(color.name, getattr(color, "swatch_id", None))
+        brand = clean_display_value(getattr(color, "brand", None))
+        details = [color.hex_code]
+        if swatch_id:
+            details.append(f"#{swatch_id}")
+        details.extend([color.finish, status])
         if brand:
             details.insert(2, brand)
-        if swatch_id:
-            details.insert(-1, f"Swatch {swatch_id}")
         card_class = "stock-card" if in_stock else "stock-card low"
         cols = st.columns([1, 0.22])
         with cols[0]:
             st.markdown(
                 f"""
                 <div class="{card_class}">
-                    <strong><span class="swatch" style="background:{color.hex_code}"></span>{color.name}</strong><br>
+                    <strong><span class="swatch" style="background:{color.hex_code}"></span>{name}</strong><br>
                     <small>{" | ".join(str(item) for item in details)}</small>
                 </div>
                 """,

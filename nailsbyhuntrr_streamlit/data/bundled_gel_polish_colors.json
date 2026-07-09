@@ -237,5 +237,33 @@
     "finish": "matte",
     "brand": "MelodySusie",
     "swatch_id": "17"
+  },
+  {
+    "name": "Soft pale pink",
+    "hex_code": "#E6BED4",
+    "finish": "matte",
+    "brand": "Canni",
+    "swatch_id": "18"
+  },
+  {
+    "name": "Light lime green",
+    "hex_code": "#8DCE63",
+    "finish": "matte",
+    "brand": "Canni",
+    "swatch_id": "19"
+  },
+  {
+    "name": "Sky blue",
+    "hex_code": "#8FC8ED",
+    "finish": "matte",
+    "brand": "Canni",
+    "swatch_id": "20"
+  },
+  {
+    "name": "Periwinkle blue",
+    "hex_code": "#93A9D9",
+    "finish": "matte",
+    "brand": "Canni",
+    "swatch_id": "21"
   }
 ]
