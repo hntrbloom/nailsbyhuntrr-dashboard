@@ -2311,6 +2311,16 @@ def render_bambu_lab() -> None:
             st.caption("Connect and refresh to see printer status data.")
 
 
+def render_api_integrations() -> None:
+    st.subheader("API")
+    st.caption("External integrations for your Etsy shop and production tools.")
+    st.markdown("### Bambu Lab A1")
+    render_bambu_lab()
+    st.divider()
+    st.markdown("### Etsy API")
+    render_etsy_api()
+
+
 def render_inventory_export(table: str, products: pd.DataFrame) -> None:
     export_cols = [
         col
@@ -3047,8 +3057,7 @@ def main() -> None:
         revenue,
         forecast,
         reviews,
-        bambu_lab,
-        etsy_api,
+        api,
     ) = st.tabs(
         [
             "Overview",
@@ -3059,8 +3068,7 @@ def main() -> None:
             "Revenue",
             "Forecast",
             "Reviews",
-            "Bambu A1",
-            "Etsy API",
+            "API",
         ]
     )
     with overview:
@@ -3079,10 +3087,8 @@ def main() -> None:
         render_forecast()
     with reviews:
         render_reviews()
-    with bambu_lab:
-        render_bambu_lab()
-    with etsy_api:
-        render_etsy_api()
+    with api:
+        render_api_integrations()
 
 
 if __name__ == "__main__":
