@@ -265,5 +265,26 @@
     "finish": "matte",
     "brand": "Canni",
     "swatch_id": "21"
+  },
+  {
+    "name": "Pale pink",
+    "hex_code": "#E6BED0",
+    "finish": "matte",
+    "brand": "Beetles",
+    "swatch_id": "22"
+  },
+  {
+    "name": "Soft lavender",
+    "hex_code": "#B6A7CE",
+    "finish": "matte",
+    "brand": "Beetles",
+    "swatch_id": "23"
+  },
+  {
+    "name": "Pastel green",
+    "hex_code": "#A7CC75",
+    "finish": "matte",
+    "brand": "Beetles",
+    "swatch_id": "24"
   }
 ]
