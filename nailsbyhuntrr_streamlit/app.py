@@ -5,6 +5,7 @@ import calendar
 import colorsys
 import hashlib
 import html
+import importlib
 import json
 import re
 import secrets
@@ -741,6 +742,153 @@ def set_setting(key: str, value: str | None) -> None:
                 """,
                 (key, value),
             )
+
+
+def bambu_get_credentials() -> dict[str, str | None]:
+    return {
+        "ip": get_setting("bambu_ip"),
+        "access_code": get_setting("bambu_access_code"),
+        "serial": get_setting("bambu_serial"),
+    }
+
+
+def bambu_save_credentials(ip: str, access_code: str, serial: str) -> None:
+    set_setting("bambu_ip", ip.strip())
+    set_setting("bambu_access_code", access_code.strip())
+    set_setting("bambu_serial", serial.strip())
+
+
+def bambu_clear_credentials() -> None:
+    for key in ["bambu_ip", "bambu_access_code", "bambu_serial"]:
+        set_setting(key, None)
+    st.session_state.pop("bambu_client", None)
+    st.session_state.pop("bambu_status", None)
+    st.session_state.pop("bambu_connected", None)
+
+
+def bambu_load_printer_class():
+    candidates = [
+        ("bambulabs_api", "Printer"),
+        ("bambulabs_api.printer", "Printer"),
+        ("bambulabs_api.bambu_printer", "BambuPrinter"),
+        ("bambulabs", "Printer"),
+    ]
+    last_error: Exception | None = None
+    for module_name, class_name in candidates:
+        try:
+            module = importlib.import_module(module_name)
+            printer_class = getattr(module, class_name, None)
+            if printer_class is not None:
+                return printer_class, None
+        except Exception as exc:
+            last_error = exc
+    return None, last_error
+
+
+def bambu_make_client(ip: str, access_code: str, serial: str):
+    printer_class, error = bambu_load_printer_class()
+    if printer_class is None:
+        detail = f" Last import error: {error}" if error else ""
+        raise RuntimeError(f"bambulabs-api is not installed or its Printer class was not found.{detail}")
+
+    constructor_attempts = [
+        {"hostname": ip, "access_code": access_code, "serial": serial},
+        {"host": ip, "access_code": access_code, "serial": serial},
+        {"ip": ip, "access_code": access_code, "serial": serial},
+        {"printer_ip": ip, "access_code": access_code, "serial_number": serial},
+        {"ip_address": ip, "access_code": access_code, "serial_number": serial},
+    ]
+    errors = []
+    for kwargs in constructor_attempts:
+        try:
+            return printer_class(**kwargs)
+        except TypeError as exc:
+            errors.append(str(exc))
+    try:
+        return printer_class(ip, access_code, serial)
+    except Exception as exc:
+        errors.append(str(exc))
+        raise RuntimeError("Could not create a Bambu printer client. " + " | ".join(errors[-3:])) from exc
+
+
+def bambu_call_first(client, method_names: list[str]):
+    for method_name in method_names:
+        method = getattr(client, method_name, None)
+        if callable(method):
+            return method()
+    return None
+
+
+def bambu_connect_client(client) -> None:
+    bambu_call_first(client, ["connect", "start", "login"])
+
+
+def bambu_disconnect_client(client) -> None:
+    bambu_call_first(client, ["disconnect", "close", "stop"])
+
+
+def bambu_status_as_dict(status) -> dict:
+    if status is None:
+        return {}
+    if isinstance(status, dict):
+        return status
+    if hasattr(status, "dict") and callable(status.dict):
+        return status.dict()
+    if hasattr(status, "model_dump") and callable(status.model_dump):
+        return status.model_dump()
+    if hasattr(status, "__dict__"):
+        return {key: value for key, value in vars(status).items() if not key.startswith("_")}
+    return {"status": str(status)}
+
+
+def bambu_get_status(client) -> dict:
+    status = bambu_call_first(client, ["get_current_state", "get_state", "get_status", "get_report"])
+    if status is None:
+        for attribute_name in ["state", "status", "report", "last_report", "printer"]:
+            if hasattr(client, attribute_name):
+                status = getattr(client, attribute_name)
+                break
+    status_data = bambu_status_as_dict(status)
+    method_map = {
+        "state": "get_state",
+        "current_state": "get_current_state",
+        "progress": "get_percentage",
+        "remaining_time": "get_time",
+        "file_name": "get_file_name",
+        "nozzle_temperature": "get_nozzle_temperature",
+        "bed_temperature": "get_bed_temperature",
+        "chamber_temperature": "get_chamber_temperature",
+        "print_speed": "get_print_speed",
+        "current_layer": "current_layer_num",
+        "total_layers": "total_layer_num",
+        "wifi_signal": "wifi_signal",
+        "print_type": "print_type",
+        "subtask_name": "subtask_name",
+    }
+    for key, method_name in method_map.items():
+        method = getattr(client, method_name, None)
+        if callable(method):
+            try:
+                value = method()
+                if value not in [None, ""]:
+                    status_data[key] = value
+            except Exception:
+                continue
+    return status_data
+
+
+def bambu_status_value(status: dict, keys: list[str], default: str = "-") -> str:
+    for key in keys:
+        value = status.get(key)
+        if value not in [None, ""]:
+            return str(value)
+    print_data = status.get("print")
+    if isinstance(print_data, dict):
+        for key in keys:
+            value = print_data.get(key)
+            if value not in [None, ""]:
+                return str(value)
+    return default
 
 
 def etsy_get_credentials() -> dict[str, str | None]:
@@ -2064,6 +2212,105 @@ def render_etsy_api() -> None:
                 st.error(str(exc))
 
 
+def render_bambu_lab() -> None:
+    st.subheader("Bambu Lab A1")
+    st.caption("Connects to your A1 on your local Wi-Fi using bambulabs-api.")
+    st.info(
+        "This printer connection usually works only when this dashboard is running on the same local network as the A1. "
+        "A Streamlit Cloud deployment normally cannot reach a printer inside your home Wi-Fi."
+    )
+
+    printer_class, import_error = bambu_load_printer_class()
+    if printer_class is None:
+        st.warning(
+            "bambulabs-api is not available in this Python environment yet. "
+            "It has been added to requirements.txt for deployment; restart the app after installing dependencies."
+        )
+        if import_error:
+            st.caption(f"Import detail: {import_error}")
+
+    creds = bambu_get_credentials()
+    has_creds = all([creds["ip"], creds["access_code"], creds["serial"]])
+    with st.expander("A1 printer credentials", expanded=not has_creds):
+        st.caption("Find these on the A1 screen under Settings > WLAN.")
+        with st.form("bambu_credentials_form"):
+            ip = st.text_input("IP address", value=creds["ip"] or "", placeholder="192.168.1.123")
+            access_code = st.text_input(
+                "Access code",
+                value=creds["access_code"] or "",
+                type="password",
+                placeholder="8-digit code from the A1",
+            )
+            serial = st.text_input("Serial number", value=creds["serial"] or "", placeholder="Printer serial number")
+            saved = st.form_submit_button("Save Bambu credentials", width="stretch")
+        if saved:
+            if not ip.strip() or not access_code.strip() or not serial.strip():
+                st.warning("Add the IP address, access code, and serial number.")
+            else:
+                bambu_save_credentials(ip, access_code, serial)
+                st.success("Bambu credentials saved locally.")
+                st.rerun()
+
+        if st.button("Clear Bambu credentials", width="stretch", disabled=not has_creds):
+            bambu_clear_credentials()
+            st.success("Bambu credentials cleared.")
+            st.rerun()
+
+    creds = bambu_get_credentials()
+    has_creds = all([creds["ip"], creds["access_code"], creds["serial"]])
+    connected = bool(st.session_state.get("bambu_connected"))
+    status = st.session_state.get("bambu_status") or {}
+
+    status_cols = st.columns(4)
+    status_cols[0].metric("Connection", "Connected" if connected else "Not connected")
+    status_cols[1].metric("Printer state", bambu_status_value(status, ["gcode_state", "state", "status"]))
+    status_cols[2].metric("Progress", bambu_status_value(status, ["mc_percent", "progress", "print_progress"]))
+    status_cols[3].metric("Remaining", bambu_status_value(status, ["mc_remaining_time", "remaining_time", "time_remaining"]))
+
+    actions = st.columns(3)
+    if actions[0].button("Connect A1", width="stretch", disabled=not has_creds or printer_class is None):
+        try:
+            client = bambu_make_client(creds["ip"] or "", creds["access_code"] or "", creds["serial"] or "")
+            bambu_connect_client(client)
+            st.session_state["bambu_client"] = client
+            st.session_state["bambu_connected"] = True
+            st.session_state["bambu_status"] = bambu_get_status(client)
+            st.success("Connected to Bambu A1.")
+            st.rerun()
+        except Exception as exc:
+            st.session_state["bambu_connected"] = False
+            st.error(f"Could not connect to the A1: {exc}")
+
+    if actions[1].button("Refresh status", width="stretch", disabled=not connected):
+        try:
+            client = st.session_state.get("bambu_client")
+            if client is None:
+                raise RuntimeError("No active Bambu client in session. Connect first.")
+            st.session_state["bambu_status"] = bambu_get_status(client)
+            st.success("Printer status refreshed.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Could not refresh printer status: {exc}")
+
+    if actions[2].button("Disconnect", width="stretch", disabled=not connected):
+        client = st.session_state.get("bambu_client")
+        if client is not None:
+            try:
+                bambu_disconnect_client(client)
+            except Exception:
+                pass
+        st.session_state.pop("bambu_client", None)
+        st.session_state["bambu_connected"] = False
+        st.success("Disconnected from Bambu A1.")
+        st.rerun()
+
+    with st.expander("Raw printer status", expanded=bool(status)):
+        if status:
+            st.json(status)
+        else:
+            st.caption("Connect and refresh to see printer status data.")
+
+
 def render_inventory_export(table: str, products: pd.DataFrame) -> None:
     export_cols = [
         col
@@ -2800,6 +3047,7 @@ def main() -> None:
         revenue,
         forecast,
         reviews,
+        bambu_lab,
         etsy_api,
     ) = st.tabs(
         [
@@ -2811,6 +3059,7 @@ def main() -> None:
             "Revenue",
             "Forecast",
             "Reviews",
+            "Bambu A1",
             "Etsy API",
         ]
     )
@@ -2830,6 +3079,8 @@ def main() -> None:
         render_forecast()
     with reviews:
         render_reviews()
+    with bambu_lab:
+        render_bambu_lab()
     with etsy_api:
         render_etsy_api()
 

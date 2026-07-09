@@ -8,6 +8,12 @@ The Forecast tab builds practical features from sales history, including calenda
 
 The same tab includes a future daily revenue forecast and an inventory restock risk classifier. The classifier combines current quantity, reorder level, recent units sold, and sales velocity to flag products as Low, Medium, or High restock risk.
 
+## Bambu Lab A1 integration
+
+The Bambu A1 tab can connect to a local A1 printer through `bambulabs-api`. Enter the printer IP address, access code, and serial number from the A1 screen under Settings > WLAN. The app stores those credentials locally in its SQLite settings table and keeps the active printer client in Streamlit session state.
+
+This feature is meant for running the dashboard on the same Wi-Fi network as the printer. Streamlit Community Cloud usually cannot reach a private home-network printer.
+
 ## Run it
 
 ```powershell
