@@ -2,11 +2,9 @@
 
 Phone-friendly Streamlit dashboard for managing Etsy inventory, colors, sales, and revenue.
 
-## ML forecasting features
+## Orders
 
-The Forecast tab builds practical features from sales history, including calendar fields, lagged revenue, rolling revenue averages, units sold, and order count. It trains a lightweight linear regression revenue model with a chronological train/test split, then reports MAE, baseline MAE, and R² score.
-
-The same tab includes a future daily revenue forecast and an inventory restock risk classifier. The classifier combines current quantity, reorder level, recent units sold, and sales velocity to flag products as Low, Medium, or High restock risk.
+The Orders tab lists past Etsy orders with date, order ID, customer, product, quantity, unit price, revenue, and source. It uses the same sales history that powers the Revenue tab.
 
 ## Bambu Lab A1 integration
 

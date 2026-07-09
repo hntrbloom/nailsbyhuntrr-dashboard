@@ -156,6 +156,7 @@ def init_db() -> None:
                 product_type TEXT NOT NULL,
                 product_id INTEGER NOT NULL,
                 product_name TEXT NOT NULL,
+                customer_name TEXT,
                 quantity INTEGER NOT NULL DEFAULT 1,
                 unit_price REAL NOT NULL DEFAULT 0,
                 unit_cost REAL NOT NULL DEFAULT 0,
@@ -229,6 +230,7 @@ def init_db() -> None:
                 "order_id": "TEXT",
             },
             "sales": {
+                "customer_name": "TEXT",
                 "currency_code": "TEXT NOT NULL DEFAULT 'USD'",
                 "etsy_receipt_id": "INTEGER",
                 "etsy_transaction_id": "INTEGER",
@@ -530,6 +532,7 @@ def ensure_bundled_sales(conn: sqlite3.Connection) -> None:
             "product_type": "imported_etsy_order",
             "product_id": 0,
             "product_name": order.get("product_name") or f"Etsy order {receipt_id}",
+            "customer_name": order.get("customer_name"),
             "quantity": quantity,
             "unit_price": round(revenue / quantity, 2),
             "unit_cost": 0,
@@ -552,6 +555,7 @@ def ensure_bundled_sales(conn: sqlite3.Connection) -> None:
                 """
                 UPDATE sales
                 SET sale_date = :sale_date, product_name = :product_name,
+                    customer_name = :customer_name,
                     quantity = :quantity, unit_price = :unit_price,
                     unit_cost = :unit_cost, revenue = :revenue,
                     currency_code = :currency_code
@@ -565,12 +569,12 @@ def ensure_bundled_sales(conn: sqlite3.Connection) -> None:
                 INSERT INTO sales
                 (
                     sale_date, product_type, product_id, product_name, quantity,
-                    unit_price, unit_cost, revenue, currency_code,
+                    customer_name, unit_price, unit_cost, revenue, currency_code,
                     etsy_receipt_id, etsy_transaction_id
                 )
                 VALUES (
                     :sale_date, :product_type, :product_id, :product_name,
-                    :quantity, :unit_price, :unit_cost, :revenue,
+                    :quantity, :customer_name, :unit_price, :unit_cost, :revenue,
                     :currency_code, :etsy_receipt_id, :etsy_transaction_id
                 )
                 """,
@@ -1420,114 +1424,6 @@ def summarize_sales(sales: pd.DataFrame) -> dict[str, float]:
         "units": units,
         "avg_order": revenue / orders if orders else 0,
     }
-
-
-def build_daily_revenue_features(sales: pd.DataFrame) -> pd.DataFrame:
-    if sales.empty:
-        return pd.DataFrame()
-    history = sales.copy()
-    history["sale_date"] = pd.to_datetime(history["sale_date"])
-    daily = (
-        history.groupby(history["sale_date"].dt.date)
-        .agg(revenue=("revenue", "sum"), units=("quantity", "sum"), orders=("id", "count"))
-        .reset_index()
-        .rename(columns={"sale_date": "date"})
-    )
-    daily["date"] = pd.to_datetime(daily["date"])
-    full_dates = pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")
-    daily = daily.set_index("date").reindex(full_dates, fill_value=0).rename_axis("date").reset_index()
-    daily["day_index"] = (daily["date"] - daily["date"].min()).dt.days
-    daily["day_of_week"] = daily["date"].dt.dayofweek
-    daily["month"] = daily["date"].dt.month
-    daily["is_weekend"] = daily["day_of_week"].isin([5, 6]).astype(int)
-    daily["rolling_7"] = daily["revenue"].shift(1).rolling(7, min_periods=1).mean().fillna(0)
-    daily["rolling_14"] = daily["revenue"].shift(1).rolling(14, min_periods=1).mean().fillna(0)
-    daily["lag_1"] = daily["revenue"].shift(1).fillna(0)
-    daily["lag_7"] = daily["revenue"].shift(7).fillna(0)
-    return daily
-
-
-def linear_regression_fit_predict(
-    frame: pd.DataFrame,
-    feature_cols: list[str],
-    target_col: str = "revenue",
-    test_ratio: float = 0.25,
-) -> dict:
-    if len(frame) < 8:
-        return {"ready": False, "reason": "Need at least 8 days of sales history for train/test scoring."}
-    split_index = max(1, min(len(frame) - 1, int(len(frame) * (1 - test_ratio))))
-    train = frame.iloc[:split_index].copy()
-    test = frame.iloc[split_index:].copy()
-    if train[target_col].nunique() <= 1:
-        return {"ready": False, "reason": "Need more variation in daily revenue before a model score is useful."}
-
-    x_train = np.column_stack([np.ones(len(train)), train[feature_cols].to_numpy(dtype=float)])
-    y_train = train[target_col].to_numpy(dtype=float)
-    coefficients = np.linalg.lstsq(x_train, y_train, rcond=None)[0]
-
-    x_test = np.column_stack([np.ones(len(test)), test[feature_cols].to_numpy(dtype=float)])
-    y_test = test[target_col].to_numpy(dtype=float)
-    predictions = np.maximum(0, x_test @ coefficients)
-    baseline_value = float(y_train.mean())
-    baseline_predictions = np.full(len(y_test), baseline_value)
-
-    mae = float(np.mean(np.abs(y_test - predictions)))
-    baseline_mae = float(np.mean(np.abs(y_test - baseline_predictions)))
-    total_variance = float(np.sum((y_test - y_test.mean()) ** 2))
-    r2 = 0.0 if total_variance == 0 else float(1 - np.sum((y_test - predictions) ** 2) / total_variance)
-    scored = test[["date", target_col]].copy()
-    scored["prediction"] = predictions
-    scored["baseline"] = baseline_predictions
-    return {
-        "ready": True,
-        "coefficients": coefficients,
-        "feature_cols": feature_cols,
-        "train_rows": len(train),
-        "test_rows": len(test),
-        "mae": mae,
-        "baseline_mae": baseline_mae,
-        "r2": r2,
-        "scored": scored,
-    }
-
-
-def forecast_daily_revenue(features: pd.DataFrame, model: dict, days: int) -> pd.DataFrame:
-    future_rows = []
-    working = features[["date", "revenue", "units", "orders"]].copy()
-    start_date = working["date"].max()
-    coefficients = model["coefficients"]
-    feature_cols = model["feature_cols"]
-    avg_units = float(working["units"].tail(14).mean()) if not working.empty else 0
-    avg_orders = float(working["orders"].tail(14).mean()) if not working.empty else 0
-
-    for offset in range(1, days + 1):
-        future_date = start_date + timedelta(days=offset)
-        row = {
-            "date": future_date,
-            "revenue": 0.0,
-            "units": avg_units,
-            "orders": avg_orders,
-        }
-        temp = pd.concat([working, pd.DataFrame([row])], ignore_index=True)
-        revenue_history = temp["revenue"].iloc[:-1]
-        engineered = {
-            "day_index": int((future_date - working["date"].min()).days),
-            "day_of_week": int(future_date.dayofweek),
-            "month": int(future_date.month),
-            "is_weekend": int(future_date.dayofweek in [5, 6]),
-            "rolling_7": float(revenue_history.tail(7).mean()) if len(revenue_history) else 0,
-            "rolling_14": float(revenue_history.tail(14).mean()) if len(revenue_history) else 0,
-            "lag_1": float(revenue_history.iloc[-1]) if len(revenue_history) else 0,
-            "lag_7": float(revenue_history.iloc[-7]) if len(revenue_history) >= 7 else 0,
-            "units": avg_units,
-            "orders": avg_orders,
-        }
-        x_future = np.array([1.0] + [float(engineered[col]) for col in feature_cols])
-        prediction = max(0.0, float(x_future @ coefficients))
-        row["revenue"] = prediction
-        working = pd.concat([working, pd.DataFrame([row])], ignore_index=True)
-        future_rows.append({"date": future_date, "forecast_revenue": prediction})
-    return pd.DataFrame(future_rows)
 
 
 def inventory_restock_risk() -> pd.DataFrame:
@@ -2739,104 +2635,61 @@ def render_revenue() -> None:
     )
 
 
-def render_forecast() -> None:
-    st.subheader("Revenue forecast")
-    sales = get_sales()
-    if sales.empty:
-        st.info("Add sales or manual revenue before training a forecast.")
+def render_orders() -> None:
+    st.subheader("Orders")
+    orders = get_sales()
+    if orders.empty:
+        st.info("No orders added yet.")
         return
 
-    features = build_daily_revenue_features(sales)
-    if features.empty:
-        st.info("No daily revenue history found yet.")
-        return
+    orders = orders.copy()
+    orders["sale_date"] = pd.to_datetime(orders["sale_date"])
+    orders = orders.sort_values("sale_date", ascending=False)
+    summary = summarize_sales(orders)
+    cols = st.columns(4)
+    cols[0].metric("Orders", f"{summary['orders']:,.0f}")
+    cols[1].metric("Revenue", money(summary["revenue"]))
+    cols[2].metric("Units", f"{summary['units']:,.0f}")
+    cols[3].metric("Avg. order", money(summary["avg_order"]))
 
-    feature_cols = [
-        "day_index",
-        "day_of_week",
-        "month",
-        "is_weekend",
-        "rolling_7",
-        "rolling_14",
-        "lag_1",
-        "lag_7",
-        "units",
-        "orders",
-    ]
-    forecast_days = st.slider("Forecast days", min_value=7, max_value=90, value=30, step=7)
-    model = linear_regression_fit_predict(features, feature_cols)
-
-    st.markdown("**Feature engineering from sales history**")
-    feature_cols_display = st.columns(4)
-    feature_cols_display[0].metric("History days", f"{len(features):,.0f}")
-    feature_cols_display[1].metric("Feature count", f"{len(feature_cols):,.0f}")
-    feature_cols_display[2].metric("Total revenue", money(float(features["revenue"].sum())))
-    feature_cols_display[3].metric("Avg daily revenue", money(float(features["revenue"].mean())))
-    st.caption("Features include calendar timing, lagged revenue, rolling averages, units sold, and order count.")
-
-    if not model["ready"]:
-        st.info(model["reason"])
-    else:
-        st.markdown("**Linear regression train/test score**")
-        metric_cols = st.columns(5)
-        metric_cols[0].metric("Train days", f"{model['train_rows']:,.0f}")
-        metric_cols[1].metric("Test days", f"{model['test_rows']:,.0f}")
-        metric_cols[2].metric("MAE", money(model["mae"]))
-        metric_cols[3].metric("Baseline MAE", money(model["baseline_mae"]))
-        metric_cols[4].metric("R² score", f"{model['r2']:.2f}")
-
-        scored = model["scored"].copy()
-        scored["date"] = pd.to_datetime(scored["date"])
-        scored_long = scored.melt(
-            id_vars="date",
-            value_vars=["revenue", "prediction", "baseline"],
-            var_name="series",
-            value_name="daily_revenue",
-        )
-        score_fig = px.line(
-            scored_long,
-            x="date",
-            y="daily_revenue",
-            color="series",
-            color_discrete_sequence=[BRAND_PRIMARY, BRAND_EMERALD, BRAND_LAVENDER],
-        )
-        score_fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=300, yaxis_title=None, xaxis_title=None)
-        st.plotly_chart(score_fig, width="stretch")
-
-        forecast = forecast_daily_revenue(features, model, forecast_days)
-        forecast_total = float(forecast["forecast_revenue"].sum()) if not forecast.empty else 0
-        st.markdown("**Future revenue forecast**")
-        forecast_cols = st.columns(3)
-        forecast_cols[0].metric("Forecast window", f"{forecast_days} days")
-        forecast_cols[1].metric("Forecast revenue", money(forecast_total))
-        forecast_cols[2].metric("Avg forecast day", money(forecast_total / forecast_days if forecast_days else 0))
-        forecast_fig = px.bar(forecast, x="date", y="forecast_revenue", color_discrete_sequence=[BRAND_PRIMARY])
-        forecast_fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=300, yaxis_title=None, xaxis_title=None)
-        st.plotly_chart(forecast_fig, width="stretch")
-
-    st.subheader("Inventory restock risk classifier")
-    risk = inventory_restock_risk()
-    if risk.empty:
-        st.info("Add products before checking restock risk.")
-        return
-    risk_view = risk.copy()
-    risk_view["daily_velocity"] = risk_view["daily_velocity"].map(lambda value: f"{value:.2f}")
-    risk_view["days_until_stockout"] = risk_view["days_until_stockout"].map(
-        lambda value: "No recent sales" if pd.isna(value) else f"{value:.0f} days"
-    )
-    risk_view = risk_view.rename(
+    order_view = orders.copy()
+    if "customer_name" not in order_view.columns:
+        order_view["customer_name"] = ""
+    order_view["order_id"] = order_view["etsy_receipt_id"].fillna(order_view["id"]).astype(str)
+    order_view["sale_date"] = order_view["sale_date"].dt.strftime("%Y-%m-%d")
+    order_view["revenue"] = order_view["revenue"].map(lambda value: money(float(value)))
+    order_view["unit_price"] = order_view["unit_price"].map(lambda value: money(float(value)))
+    order_view = order_view[
+        [
+            "sale_date",
+            "order_id",
+            "customer_name",
+            "product_name",
+            "quantity",
+            "unit_price",
+            "revenue",
+            "product_type",
+        ]
+    ].rename(
         columns={
-            "product_line": "Product line",
-            "name": "Product",
+            "sale_date": "Date",
+            "order_id": "Order ID",
+            "customer_name": "Customer",
+            "product_name": "Product",
             "quantity": "Qty",
-            "reorder_level": "Reorder at",
-            "recent_units_sold": "Sold last 30 days",
-            "daily_velocity": "Units/day",
-            "days_until_stockout": "Stockout estimate",
-            "risk": "Risk",
+            "unit_price": "Unit price",
+            "revenue": "Revenue",
+            "product_type": "Source",
         }
     )
-    st.dataframe(risk_view, hide_index=True, width="stretch")
+    st.dataframe(order_view, hide_index=True, width="stretch")
+    st.download_button(
+        "Download orders CSV",
+        order_view.to_csv(index=False),
+        file_name="etsy_orders.csv",
+        mime="text/csv",
+        width="stretch",
+    )
 
 
 def render_sale_entry() -> None:
@@ -3053,7 +2906,7 @@ def main() -> None:
         gel_polish,
         filament,
         revenue,
-        forecast,
+        orders,
         reviews,
         api,
     ) = st.tabs(
@@ -3064,7 +2917,7 @@ def main() -> None:
             "Gel Polish Catalog",
             "3D Filament Colors",
             "Revenue",
-            "Forecast",
+            "Orders",
             "Reviews",
             "API",
         ]
@@ -3081,8 +2934,8 @@ def main() -> None:
         render_catalog("filament", "3D Filament Colors")
     with revenue:
         render_revenue()
-    with forecast:
-        render_forecast()
+    with orders:
+        render_orders()
     with reviews:
         render_reviews()
     with api:
