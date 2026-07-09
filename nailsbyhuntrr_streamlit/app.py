@@ -21,6 +21,7 @@ import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -180,6 +181,13 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS instagram_embeds (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT,
+                embed_code TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             """
         )
@@ -2877,6 +2885,54 @@ def render_reviews() -> None:
     )
 
 
+def get_instagram_embeds() -> pd.DataFrame:
+    with connect() as conn:
+        return pd.read_sql_query(
+            "SELECT id, title, embed_code, created_at FROM instagram_embeds ORDER BY id DESC",
+            conn,
+        )
+
+
+def normalize_instagram_embed(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+
+    if "<blockquote" in text.lower() or "<iframe" in text.lower():
+        if "instagram.com/embed.js" not in text:
+            text += "\n<script async src=\"//www.instagram.com/embed.js\"></script>"
+        return text
+
+    parsed = urlparse(text)
+    if "instagram.com" not in parsed.netloc.lower():
+        return text
+
+    post_url = text.split("?")[0].rstrip("/") + "/"
+    escaped_url = html.escape(post_url, quote=True)
+    return (
+        f'<blockquote class="instagram-media" data-instgrm-permalink="{escaped_url}" '
+        'data-instgrm-version="14" style="background:#FFF; border:0; margin:0 auto; '
+        'max-width:540px; min-width:280px; width:100%;"></blockquote>'
+        '\n<script async src="//www.instagram.com/embed.js"></script>'
+    )
+
+
+def add_instagram_embed(title: str, embed_code: str) -> None:
+    cleaned = normalize_instagram_embed(embed_code)
+    if not cleaned:
+        return
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO instagram_embeds (title, embed_code) VALUES (?, ?)",
+            (title.strip() or "Instagram post", cleaned),
+        )
+
+
+def delete_instagram_embed(embed_id: int) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM instagram_embeds WHERE id = ?", (embed_id,))
+
+
 def instagram_secret(name: str, default: str = "") -> str:
     try:
         instagram_config = st.secrets.get("instagram", {})
@@ -2934,51 +2990,80 @@ def render_instagram_collage(media: list[dict]) -> None:
 
 def render_instagram() -> None:
     st.subheader("Instagram")
-    st.caption("A collage of recent posts from @nailsbyhuntrr.")
+    st.caption("A showcase wall for posts from @nailsbyhuntrr.")
     st.link_button("Open Instagram profile", "https://www.instagram.com/nailsbyhuntrr/", width="stretch")
 
-    user_id = instagram_secret("user_id")
-    access_token = instagram_secret("access_token")
-    api_base = instagram_secret("api_base", "https://graph.instagram.com")
+    with st.expander("Add Instagram post", expanded=False):
+        st.caption("Paste either the Instagram embed code or the normal post/reel URL.")
+        with st.form("instagram_embed_form", clear_on_submit=True):
+            title = st.text_input("Label", placeholder="Pink Y2K nail set")
+            embed_code = st.text_area(
+                "Embed code or Instagram URL",
+                placeholder="https://www.instagram.com/p/...",
+                height=120,
+            )
+            submitted = st.form_submit_button("Save Instagram post", width="stretch")
+        if submitted:
+            if not embed_code.strip():
+                st.warning("Paste an Instagram URL or embed code first.")
+            else:
+                add_instagram_embed(title, embed_code)
+                st.success("Saved Instagram post.")
+                st.rerun()
 
-    if not user_id or not access_token:
-        st.info(
-            "Add your Instagram API credentials to Streamlit secrets to pull posts automatically. "
-            "Use `instagram_user_id` and `instagram_access_token`, or an `[instagram]` secrets section."
-        )
-        st.code(
-            """
+    embeds = get_instagram_embeds()
+    if embeds.empty:
+        st.info("No Instagram posts saved yet. Add an embed link above to start the showcase.")
+    else:
+        st.metric("Saved posts", f"{len(embeds):,.0f}")
+        columns = st.columns(2)
+        for index, post in enumerate(embeds.itertuples()):
+            with columns[index % 2]:
+                st.markdown(f"**{post.title or 'Instagram post'}**")
+                components.html(str(post.embed_code), height=720, scrolling=True)
+                if st.button("Remove", key=f"remove_instagram_{post.id}", width="stretch"):
+                    delete_instagram_embed(int(post.id))
+                    st.rerun()
+
+    with st.expander("Optional: pull posts with the Instagram API", expanded=False):
+        user_id = instagram_secret("user_id")
+        access_token = instagram_secret("access_token")
+        api_base = instagram_secret("api_base", "https://graph.instagram.com")
+
+        if not user_id or not access_token:
+            st.info(
+                "You can skip this if embeds are easier. API credentials only matter if you want automatic post pulling."
+            )
+            st.code(
+                """
 [instagram]
 user_id = "YOUR_INSTAGRAM_USER_ID"
 access_token = "YOUR_LONG_LIVED_ACCESS_TOKEN"
 api_base = "https://graph.instagram.com"
-            """.strip(),
-            language="toml",
-        )
-        st.caption(
-            "For an Instagram business account connected through Meta, set `api_base` to your Graph API base if needed."
-        )
-        return
+                """.strip(),
+                language="toml",
+            )
+            return
 
-    limit = st.slider("Posts to show", min_value=6, max_value=48, value=24, step=6)
-    try:
-        with st.spinner("Pulling Instagram posts..."):
-            media = fetch_instagram_media(user_id, access_token, api_base, limit)
-    except requests.HTTPError as exc:
-        status = exc.response.status_code if exc.response is not None else "unknown"
-        st.error(f"Instagram did not return posts. HTTP status: {status}. Check the token, user id, and API permissions.")
-        return
-    except requests.RequestException as exc:
-        st.error(f"Could not reach Instagram right now: {exc}")
-        return
+        limit = st.slider("Posts to show", min_value=6, max_value=48, value=24, step=6)
+        try:
+            with st.spinner("Pulling Instagram posts..."):
+                media = fetch_instagram_media(user_id, access_token, api_base, limit)
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "unknown"
+            st.error(f"Instagram did not return posts. HTTP status: {status}. Check the token, user id, and API permissions.")
+            return
+        except requests.RequestException as exc:
+            st.error(f"Could not reach Instagram right now: {exc}")
+            return
 
-    image_media = [
-        item
-        for item in media
-        if item.get("media_type") in {"IMAGE", "CAROUSEL_ALBUM", "VIDEO"} and (item.get("media_url") or item.get("thumbnail_url"))
-    ]
-    st.metric("Posts loaded", f"{len(image_media):,.0f}")
-    render_instagram_collage(image_media)
+        image_media = [
+            item
+            for item in media
+            if item.get("media_type") in {"IMAGE", "CAROUSEL_ALBUM", "VIDEO"} and (item.get("media_url") or item.get("thumbnail_url"))
+        ]
+        st.metric("Posts loaded from API", f"{len(image_media):,.0f}")
+        render_instagram_collage(image_media)
 
 
 def render_gel_polish_swatch_chart(colors: pd.DataFrame) -> None:
