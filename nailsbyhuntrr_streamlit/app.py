@@ -2021,11 +2021,86 @@ def style_page() -> None:
             position: absolute;
             right: 0;
         }}
+        .about-profile {{
+            display: grid;
+            gap: 2.6rem;
+            grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+            margin-top: 0.6rem;
+        }}
+        .about-side h3,
+        .about-main h3 {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            margin: 0 0 2rem;
+        }}
+        .about-mini-stats {{
+            display: flex;
+            gap: 1.7rem;
+            margin-bottom: 1.5rem;
+        }}
+        .about-mini-stat span {{
+            display: block;
+            font-size: 0.9rem;
+            margin-bottom: 0.2rem;
+        }}
+        .about-mini-stat strong {{
+            display: block;
+            font-size: 1.85rem;
+            line-height: 1;
+        }}
+        .about-tagline {{
+            font-size: 1rem;
+            margin-bottom: 1.7rem;
+        }}
+        .about-headline {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 1.75rem;
+            font-weight: 800;
+            line-height: 1.18;
+            margin: 0 0 2rem;
+        }}
+        .about-body {{
+            color: rgba(27, 27, 27, 0.76);
+            font-size: 1.04rem;
+            line-height: 1.45;
+            max-width: 780px;
+        }}
+        .about-member {{
+            align-items: center;
+            display: flex;
+            gap: 1rem;
+            margin-top: 2.7rem;
+        }}
+        .about-avatar {{
+            align-items: center;
+            background: linear-gradient(135deg, #ffb7d5, #c7b3e5);
+            border-radius: 50%;
+            color: #1b1b1b;
+            display: flex;
+            flex: 0 0 62px;
+            font-weight: 800;
+            height: 62px;
+            justify-content: center;
+            width: 62px;
+        }}
+        .about-member strong {{
+            display: block;
+            font-size: 1.05rem;
+        }}
+        .about-member span {{
+            display: block;
+            font-size: 0.92rem;
+        }}
         @media (max-width: 640px) {{
             .block-container {{
                 padding-left: 0.85rem;
                 padding-right: 0.85rem;
                 padding-top: 1.1rem;
+            }}
+            .about-profile {{
+                gap: 1.6rem;
+                grid-template-columns: 1fr;
             }}
             div[data-testid="column"] {{
                 width: 100% !important;
@@ -2071,25 +2146,54 @@ def render_overview() -> None:
 
 
 def render_about_me() -> None:
-    st.subheader("About Me")
-    st.markdown(
-        """
-        **NailsByHuntrr** is my handmade Etsy shop for custom press-on nails,
-        cute 3D printed keychains, gel polish swatches, and production planning.
-
-        This dashboard keeps my shop information in one place so I can track
-        orders, revenue, reviews, nail sets, keychain files, polish colors, and
-        the printer details I need before making each product.
-        """
-    )
-
     shop_stats = load_shop_stats()
-    if shop_stats:
-        stat_cols = st.columns(4)
-        stat_cols[0].metric("Sales", f"{int(shop_stats.get('sales', 0)):,.0f}")
-        stat_cols[1].metric("Orders", f"{int(shop_stats.get('orders', 0)):,.0f}")
-        stat_cols[2].metric("Favorites", f"{int(shop_stats.get('favorites', 0)):,.0f}")
-        stat_cols[3].metric("Revenue", money(float(shop_stats.get("revenue", 0))))
+    sales = int(shop_stats.get("sales", 35) or 0)
+    favorites = int(shop_stats.get("favorites", 93) or 0)
+    location = html.escape(str(shop_stats.get("location", "Des Moines, Iowa")))
+    st.markdown(
+        f"""
+        <div class="about-profile">
+            <aside class="about-side">
+                <h3>About NailsByHuntrr</h3>
+                <div class="about-mini-stats">
+                    <div class="about-mini-stat">
+                        <span>Sales</span>
+                        <strong>{sales:,}</strong>
+                    </div>
+                    <div class="about-mini-stat">
+                        <span>On Etsy since</span>
+                        <strong>2024</strong>
+                    </div>
+                </div>
+                <div class="about-mini-stat">
+                    <span>Shop favorites</span>
+                    <strong>{favorites:,}</strong>
+                </div>
+            </aside>
+            <section class="about-main">
+                <p class="about-tagline">custom to order nail sets by huntrr &lt;3</p>
+                <h2 class="about-headline">Hand painted press-on nails by a passionate young nail artist</h2>
+                <p class="about-body">
+                    Hi! I'm Hunter behind NailsByHuntrr, where I design and hand-paint press-on nails
+                    for people who want salon-quality looks without the salon time. I have always loved
+                    math, science, and technology, and I bring that same curiosity and attention to detail
+                    into every nail set I create. For me, nails are the perfect mix of art and precision,
+                    and a perfect getaway from the computer.
+                </p>
+                <div class="about-member">
+                    <div class="about-avatar">HB</div>
+                    <div>
+                        <h3>Shop members</h3>
+                        <strong>Hunter Bloom</strong>
+                        <span>Owner, Maker, Designer</span>
+                        <span>{location}</span>
+                    </div>
+                </div>
+            </section>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_etsy_api() -> None:
