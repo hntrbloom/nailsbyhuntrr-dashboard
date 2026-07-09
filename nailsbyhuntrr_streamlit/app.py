@@ -1978,6 +1978,41 @@ def style_page() -> None:
         .swatch-out {{
             outline: 2px solid rgba(210, 4, 45, 0.42);
         }}
+        .instagram-collage {{
+            display: grid;
+            gap: 0.65rem;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            margin-top: 0.85rem;
+        }}
+        .instagram-tile {{
+            aspect-ratio: 1 / 1;
+            background: #fff;
+            border: 1px solid rgba(27, 27, 27, 0.08);
+            border-radius: 8px;
+            box-shadow: 0 1px 8px rgba(27, 27, 27, 0.05);
+            overflow: hidden;
+            position: relative;
+        }}
+        .instagram-tile img {{
+            display: block;
+            height: 100%;
+            object-fit: cover;
+            width: 100%;
+        }}
+        .instagram-tile span {{
+            background: rgba(27, 27, 27, 0.58);
+            bottom: 0;
+            color: #fff;
+            display: block;
+            font-size: 0.72rem;
+            left: 0;
+            line-height: 1.2;
+            max-height: 3.2rem;
+            overflow: hidden;
+            padding: 0.35rem 0.45rem;
+            position: absolute;
+            right: 0;
+        }}
         @media (max-width: 640px) {{
             .block-container {{
                 padding-left: 0.85rem;
@@ -2842,6 +2877,110 @@ def render_reviews() -> None:
     )
 
 
+def instagram_secret(name: str, default: str = "") -> str:
+    try:
+        instagram_config = st.secrets.get("instagram", {})
+        value = instagram_config.get(name) or st.secrets.get(f"instagram_{name}", default)
+    except (AttributeError, FileNotFoundError, KeyError):
+        value = default
+    return str(value or "").strip()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_instagram_media(user_id: str, access_token: str, api_base: str, limit: int = 24) -> list[dict]:
+    media: list[dict] = []
+    url = f"{api_base.rstrip('/')}/{user_id}/media"
+    params = {
+        "fields": "id,caption,media_type,media_url,permalink,thumbnail_url,timestamp",
+        "access_token": access_token,
+        "limit": min(max(limit, 1), 50),
+    }
+
+    while url and len(media) < limit:
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        payload = response.json()
+        media.extend(payload.get("data", []))
+        url = payload.get("paging", {}).get("next")
+        params = {}
+
+    return media[:limit]
+
+
+def render_instagram_collage(media: list[dict]) -> None:
+    tiles = []
+    for item in media:
+        image_url = item.get("thumbnail_url") or item.get("media_url")
+        if not image_url:
+            continue
+        permalink = html.escape(str(item.get("permalink") or "https://www.instagram.com/nailsbyhuntrr/"))
+        caption = html.escape(str(item.get("caption") or "NailsByHuntrr"))
+        short_caption = caption[:95] + ("..." if len(caption) > 95 else "")
+        tiles.append(
+            f"""
+            <a class="instagram-tile" href="{permalink}" target="_blank" rel="noopener noreferrer">
+                <img src="{html.escape(str(image_url))}" alt="{short_caption}">
+                <span>{short_caption}</span>
+            </a>
+            """
+        )
+
+    if not tiles:
+        st.info("Instagram connected, but no image posts were returned yet.")
+        return
+
+    st.markdown(f"<div class=\"instagram-collage\">{''.join(tiles)}</div>", unsafe_allow_html=True)
+
+
+def render_instagram() -> None:
+    st.subheader("Instagram")
+    st.caption("A collage of recent posts from @nailsbyhuntrr.")
+    st.link_button("Open Instagram profile", "https://www.instagram.com/nailsbyhuntrr/", width="stretch")
+
+    user_id = instagram_secret("user_id")
+    access_token = instagram_secret("access_token")
+    api_base = instagram_secret("api_base", "https://graph.instagram.com")
+
+    if not user_id or not access_token:
+        st.info(
+            "Add your Instagram API credentials to Streamlit secrets to pull posts automatically. "
+            "Use `instagram_user_id` and `instagram_access_token`, or an `[instagram]` secrets section."
+        )
+        st.code(
+            """
+[instagram]
+user_id = "YOUR_INSTAGRAM_USER_ID"
+access_token = "YOUR_LONG_LIVED_ACCESS_TOKEN"
+api_base = "https://graph.instagram.com"
+            """.strip(),
+            language="toml",
+        )
+        st.caption(
+            "For an Instagram business account connected through Meta, set `api_base` to your Graph API base if needed."
+        )
+        return
+
+    limit = st.slider("Posts to show", min_value=6, max_value=48, value=24, step=6)
+    try:
+        with st.spinner("Pulling Instagram posts..."):
+            media = fetch_instagram_media(user_id, access_token, api_base, limit)
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "unknown"
+        st.error(f"Instagram did not return posts. HTTP status: {status}. Check the token, user id, and API permissions.")
+        return
+    except requests.RequestException as exc:
+        st.error(f"Could not reach Instagram right now: {exc}")
+        return
+
+    image_media = [
+        item
+        for item in media
+        if item.get("media_type") in {"IMAGE", "CAROUSEL_ALBUM", "VIDEO"} and (item.get("media_url") or item.get("thumbnail_url"))
+    ]
+    st.metric("Posts loaded", f"{len(image_media):,.0f}")
+    render_instagram_collage(image_media)
+
+
 def render_gel_polish_swatch_chart(colors: pd.DataFrame) -> None:
     sorted_colors = sorted(
         list(colors.itertuples()),
@@ -3039,6 +3178,7 @@ def main() -> None:
         revenue,
         orders,
         reviews,
+        instagram,
         api,
     ) = st.tabs(
         [
@@ -3051,6 +3191,7 @@ def main() -> None:
             "Revenue",
             "Orders",
             "Reviews",
+            "Instagram",
             "API",
         ]
     )
@@ -3072,6 +3213,8 @@ def main() -> None:
         render_orders()
     with reviews:
         render_reviews()
+    with instagram:
+        render_instagram()
     with api:
         render_api_integrations()
 
