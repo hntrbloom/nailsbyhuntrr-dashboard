@@ -2314,10 +2314,8 @@ def render_bambu_lab() -> None:
 def render_api_integrations() -> None:
     st.subheader("API")
     st.caption("External integrations for your Etsy shop and production tools.")
-    st.markdown("### Bambu Lab A1")
     render_bambu_lab()
     st.divider()
-    st.markdown("### Etsy API")
     render_etsy_api()
 
 
