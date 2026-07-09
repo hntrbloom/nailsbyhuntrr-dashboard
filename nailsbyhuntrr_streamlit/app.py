@@ -2115,7 +2115,6 @@ def style_page() -> None:
 
 def render_header() -> None:
     st.title("NailsByHuntrr")
-    st.caption("Etsy inventory, sales, and product catalog")
 
 
 def render_overview() -> None:
@@ -2198,13 +2197,16 @@ def render_about_me() -> None:
 
 def render_etsy_api() -> None:
     st.subheader("Etsy API")
-    st.caption("Connects this local dashboard to your own Etsy shop through Etsy Open API v3.")
-    st.info(
-        "Etsy requires an app key, shared secret, OAuth approval, and an exact HTTPS redirect URI. "
-        "For a private tool that only accesses your own shop, Etsy says commercial access is not required."
-    )
 
     creds = etsy_get_credentials()
+    connected = bool(creds["access_token"] and creds["refresh_token"])
+    status_cols = st.columns(4)
+    status_cols[0].metric("OAuth", "Connected" if connected else "Not connected")
+    status_cols[1].metric("User ID", creds["user_id"] or "-")
+    status_cols[2].metric("Shop ID", creds["shop_id"] or "-")
+    expires_at = int(creds["expires_at"] or "0")
+    status_cols[3].metric("Token", "Fresh" if expires_at > int(time.time()) else "Needs refresh")
+
     with st.expander("1. Etsy app credentials", expanded=not bool(creds["keystring"])):
         with st.form("etsy_credentials_form"):
             keystring = st.text_input("API keystring", value=creds["keystring"] or "")
@@ -2231,12 +2233,6 @@ def render_etsy_api() -> None:
 
     creds = etsy_get_credentials()
     connected = bool(creds["access_token"] and creds["refresh_token"])
-    status_cols = st.columns(4)
-    status_cols[0].metric("OAuth", "Connected" if connected else "Not connected")
-    status_cols[1].metric("User ID", creds["user_id"] or "-")
-    status_cols[2].metric("Shop ID", creds["shop_id"] or "-")
-    expires_at = int(creds["expires_at"] or "0")
-    status_cols[3].metric("Token", "Fresh" if expires_at > int(time.time()) else "Needs refresh")
 
     with st.expander("2. Connect OAuth", expanded=not connected and bool(creds["keystring"])):
         scopes = st.multiselect(
@@ -3094,7 +3090,6 @@ def render_instagram_collage(media: list[dict]) -> None:
 
 def render_instagram() -> None:
     st.subheader("Instagram")
-    st.caption("A showcase wall for posts from @nailsbyhuntrr.")
     st.link_button("Open Instagram profile", "https://www.instagram.com/nailsbyhuntrr/", width="stretch")
 
     with st.expander("Add Instagram post", expanded=False):
