@@ -1,0 +1,241 @@
+[
+  {
+    "name": "pale aqua",
+    "hex_code": "#9BD6E1",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "light aqua",
+    "hex_code": "#93CAE8",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "turquoise blue",
+    "hex_code": "#52BAE3",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "sky blue",
+    "hex_code": "#509CCA",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "cobalt blue",
+    "hex_code": "#2E48C6",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "purple",
+    "hex_code": "#9F46AF",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "lilac pink",
+    "hex_code": "#DD9BD7",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "hot pink left",
+    "hex_code": "#E56FAF",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "hot pink middle",
+    "hex_code": "#EF5896",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "red/coral",
+    "hex_code": "#DA4953",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "yellow",
+    "hex_code": "#DEB336",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "pale gray/lavender",
+    "hex_code": "#BFBBBD",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "pale nude-pink",
+    "hex_code": "#B9AEAD",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "pale pink",
+    "hex_code": "#CDB4B7",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "light lavender",
+    "hex_code": "#CDB2C5",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "bubblegum pink",
+    "hex_code": "#D6A8BB",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "medium pink",
+    "hex_code": "#DCAFC8",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "soft pink right",
+    "hex_code": "#E2A5B9",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "pale cream/yellow",
+    "hex_code": "#DDD2AC",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "pale blue",
+    "hex_code": "#ADC4CE",
+    "finish": "matte",
+    "brand": "Beetles"
+  },
+  {
+    "name": "Milky white",
+    "hex_code": "#F3F4F6",
+    "finish": "matte",
+    "brand": "Double Rhythm",
+    "swatch_id": "01"
+  },
+  {
+    "name": "Bubblegum pink",
+    "hex_code": "#E879B9",
+    "finish": "matte",
+    "brand": "Double Rhythm",
+    "swatch_id": "06"
+  },
+  {
+    "name": "Hot pink",
+    "hex_code": "#EC309B",
+    "finish": "matte",
+    "brand": "Double Rhythm",
+    "swatch_id": "07"
+  },
+  {
+    "name": "Soft white",
+    "hex_code": "#EFEFF1",
+    "finish": "jelly",
+    "brand": "Double Rhythm",
+    "swatch_id": "02"
+  },
+  {
+    "name": "Warm ivory cream",
+    "hex_code": "#EFEAD4",
+    "finish": "jelly",
+    "brand": "Double Rhythm",
+    "swatch_id": "03"
+  },
+  {
+    "name": "Sheer blush pink",
+    "hex_code": "#E8B8C7",
+    "finish": "jelly",
+    "brand": "Double Rhythm",
+    "swatch_id": "04"
+  },
+  {
+    "name": "Baby pink",
+    "hex_code": "#E9AFC1",
+    "finish": "jelly",
+    "brand": "Double Rhythm",
+    "swatch_id": "05"
+  },
+  {
+    "name": "Powder blue",
+    "hex_code": "#C9DAEA",
+    "finish": "jelly",
+    "brand": "Double Rhythm",
+    "swatch_id": "09"
+  },
+  {
+    "name": "Icy pale blue",
+    "hex_code": "#DCEFF8",
+    "finish": "matte",
+    "brand": "Double Rhythm",
+    "swatch_id": "08"
+  },
+  {
+    "name": "Champagne glitter",
+    "hex_code": "#BDA99B",
+    "finish": "cat eye",
+    "brand": "Double Rhythm",
+    "swatch_id": "10"
+  },
+  {
+    "name": "Mauve glitter",
+    "hex_code": "#B89AAF",
+    "finish": "cat eye",
+    "brand": "Double Rhythm",
+    "swatch_id": "11"
+  },
+  {
+    "name": "Mint shimmer",
+    "hex_code": "#C8DCC4",
+    "finish": "cat eye",
+    "brand": "Double Rhythm",
+    "swatch_id": "12"
+  },
+  {
+    "name": "Blue glitter",
+    "hex_code": "#7FAFCA",
+    "finish": "cat eye",
+    "brand": "Double Rhythm",
+    "swatch_id": "13"
+  },
+  {
+    "name": "Sheer milky white",
+    "hex_code": "#F0F0ED",
+    "finish": "builder gel / jelly",
+    "brand": "MelodySusie",
+    "swatch_id": "14"
+  },
+  {
+    "name": "Jelly pink",
+    "hex_code": "#DDA6B8",
+    "finish": "builder gel / jelly",
+    "brand": "MelodySusie",
+    "swatch_id": "15"
+  },
+  {
+    "name": "Lavender jelly",
+    "hex_code": "#B8A8DD",
+    "finish": "builder gel / jelly",
+    "brand": "MelodySusie",
+    "swatch_id": "16"
+  },
+  {
+    "name": "Very Pale pink",
+    "hex_code": "#E7C3D5",
+    "finish": "matte",
+    "brand": "MelodySusie",
+    "swatch_id": "17"
+  }
+]

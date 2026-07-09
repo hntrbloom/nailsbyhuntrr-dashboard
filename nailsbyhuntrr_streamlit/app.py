@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import base64
+import calendar
+import colorsys
 import hashlib
 import html
+import json
+import re
 import secrets
 import random
 import sqlite3
@@ -28,6 +32,7 @@ BRAND_EMERALD = "#2E8B57"
 BRAND_NOIR = "#1B1B1B"
 BRAND_DANGER = "#D2042D"
 CHART_COLORS = [BRAND_PINK, BRAND_PRIMARY, BRAND_LAVENDER, BRAND_CORAL, BRAND_EMERALD, BRAND_NOIR]
+ETSY_HISTORY_MONTHS = 18
 
 
 st.set_page_config(
@@ -40,6 +45,32 @@ st.set_page_config(
 
 def money(value: float) -> str:
     return f"${value:,.2f}"
+
+
+def compact_number(value: float | int) -> str:
+    number = float(value)
+    if abs(number) >= 1000:
+        text = f"{number / 1000:.1f}".rstrip("0").rstrip(".")
+        return f"{text}K"
+    return f"{number:,.0f}"
+
+
+def etsy_history_start() -> date:
+    today = date.today()
+    month = today.month - ETSY_HISTORY_MONTHS
+    year = today.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    day = min(today.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def load_shop_stats() -> dict:
+    data_path = APP_DIR / "data" / "shop_stats.json"
+    if not data_path.exists():
+        return {}
+    return json.loads(data_path.read_text(encoding="utf-8"))
 
 
 def connect() -> sqlite3.Connection:
@@ -58,6 +89,8 @@ def init_db() -> None:
                 name TEXT NOT NULL,
                 hex_code TEXT NOT NULL,
                 finish TEXT NOT NULL DEFAULT 'glossy',
+                brand TEXT,
+                swatch_id TEXT,
                 in_stock INTEGER NOT NULL DEFAULT 1,
                 catalog_type TEXT NOT NULL DEFAULT 'gel_polish',
                 UNIQUE(name, catalog_type)
@@ -124,7 +157,10 @@ def init_db() -> None:
                 quantity INTEGER NOT NULL DEFAULT 1,
                 unit_price REAL NOT NULL DEFAULT 0,
                 unit_cost REAL NOT NULL DEFAULT 0,
-                revenue REAL NOT NULL DEFAULT 0
+                revenue REAL NOT NULL DEFAULT 0,
+                currency_code TEXT NOT NULL DEFAULT 'USD',
+                etsy_receipt_id INTEGER,
+                etsy_transaction_id INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS reviews (
@@ -151,6 +187,10 @@ def init_db() -> None:
             conn.execute(
                 "ALTER TABLE colors ADD COLUMN catalog_type TEXT NOT NULL DEFAULT 'gel_polish'"
             )
+        if "brand" not in color_columns:
+            conn.execute("ALTER TABLE colors ADD COLUMN brand TEXT")
+        if "swatch_id" not in color_columns:
+            conn.execute("ALTER TABLE colors ADD COLUMN swatch_id TEXT")
         product_columns = {
             "press_on_nails": {
                 "etsy_listing_id": "INTEGER",
@@ -186,6 +226,11 @@ def init_db() -> None:
             "reviews": {
                 "order_id": "TEXT",
             },
+            "sales": {
+                "currency_code": "TEXT NOT NULL DEFAULT 'USD'",
+                "etsy_receipt_id": "INTEGER",
+                "etsy_transaction_id": "INTEGER",
+            },
         }
         for table, columns in product_columns.items():
             existing = {
@@ -208,6 +253,13 @@ def init_db() -> None:
             WHERE etsy_listing_id IS NOT NULL
             """
         )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_etsy_transaction_id
+            ON sales(etsy_transaction_id)
+            WHERE etsy_transaction_id IS NOT NULL
+            """
+        )
         colors_sql = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'colors'"
         ).fetchone()["sql"]
@@ -220,12 +272,14 @@ def init_db() -> None:
                     name TEXT NOT NULL,
                     hex_code TEXT NOT NULL,
                     finish TEXT NOT NULL DEFAULT 'glossy',
+                    brand TEXT,
+                    swatch_id TEXT,
                     in_stock INTEGER NOT NULL DEFAULT 1,
                     catalog_type TEXT NOT NULL DEFAULT 'gel_polish',
                     UNIQUE(name, catalog_type)
                 );
-                INSERT INTO colors_new (id, name, hex_code, finish, in_stock, catalog_type)
-                SELECT id, name, hex_code, finish, in_stock, catalog_type FROM colors;
+                INSERT INTO colors_new (id, name, hex_code, finish, brand, swatch_id, in_stock, catalog_type)
+                SELECT id, name, hex_code, finish, brand, swatch_id, in_stock, catalog_type FROM colors;
                 DROP TABLE colors;
                 ALTER TABLE colors_new RENAME TO colors;
                 """
@@ -238,6 +292,10 @@ def init_db() -> None:
             conn.execute(
                 "INSERT INTO app_settings (key, value) VALUES ('seeded_sample_data', '1')"
             )
+        ensure_bundled_nails(conn)
+        ensure_bundled_reviews(conn)
+        ensure_bundled_sales(conn)
+        ensure_bundled_gel_polish_colors(conn)
         ensure_bundled_filament_colors(conn)
         ensure_bundled_keychains(conn)
 
@@ -324,6 +382,200 @@ def seed_db(conn: sqlite3.Connection) -> None:
     )
 
 
+def ensure_bundled_nails(conn: sqlite3.Connection) -> None:
+    data_path = APP_DIR / "data" / "bundled_nails.json"
+    if not data_path.exists():
+        return
+    nails = json.loads(data_path.read_text(encoding="utf-8"))
+    for nail in nails:
+        item = {
+            "etsy_listing_id": nail.get("etsy_listing_id"),
+            "name": nail["name"],
+            "description": nail.get("description"),
+            "shape": nail.get("shape") or "custom",
+            "length": nail.get("length") or "varies",
+            "color_id": None,
+            "price": float(nail.get("price") or 0),
+            "currency_code": nail.get("currency_code") or "USD",
+            "cost": float(nail.get("cost") or 0),
+            "quantity": int(nail.get("quantity") or 0),
+            "reorder_level": int(nail.get("reorder_level") or 1),
+            "tags": nail.get("tags"),
+            "materials": nail.get("materials"),
+            "image_url": nail.get("image_url"),
+            "image_urls": nail.get("image_urls"),
+            "sku": nail.get("sku"),
+            "variation_1_name": nail.get("variation_1_name"),
+            "variation_1_values": nail.get("variation_1_values"),
+            "variation_2_name": nail.get("variation_2_name"),
+            "variation_2_values": nail.get("variation_2_values"),
+        }
+        existing = conn.execute(
+            "SELECT id FROM press_on_nails WHERE name = ?",
+            (item["name"],),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE press_on_nails
+                SET etsy_listing_id = COALESCE(:etsy_listing_id, etsy_listing_id),
+                    description = :description,
+                    shape = :shape,
+                    length = :length,
+                    price = :price,
+                    currency_code = :currency_code,
+                    cost = :cost,
+                    quantity = :quantity,
+                    reorder_level = :reorder_level,
+                    tags = :tags,
+                    materials = :materials,
+                    image_url = :image_url,
+                    image_urls = :image_urls,
+                    sku = :sku,
+                    variation_1_name = :variation_1_name,
+                    variation_1_values = :variation_1_values,
+                    variation_2_name = :variation_2_name,
+                    variation_2_values = :variation_2_values
+                WHERE id = :id
+                """,
+                {**item, "id": existing["id"]},
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO press_on_nails
+                (
+                    etsy_listing_id, name, description, shape, length, color_id,
+                    price, currency_code, cost, quantity, reorder_level, tags,
+                    materials, image_url, image_urls, sku, variation_1_name,
+                    variation_1_values, variation_2_name, variation_2_values
+                )
+                VALUES (
+                    :etsy_listing_id, :name, :description, :shape, :length, :color_id,
+                    :price, :currency_code, :cost, :quantity, :reorder_level, :tags,
+                    :materials, :image_url, :image_urls, :sku, :variation_1_name,
+                    :variation_1_values, :variation_2_name, :variation_2_values
+                )
+                """,
+                item,
+            )
+
+
+def ensure_bundled_reviews(conn: sqlite3.Connection) -> None:
+    data_path = APP_DIR / "data" / "bundled_reviews.json"
+    if not data_path.exists():
+        return
+    reviews = json.loads(data_path.read_text(encoding="utf-8"))
+    for review in reviews:
+        values = {
+            "review_date": review["review_date"],
+            "product_name": review.get("product_name") or "Etsy review",
+            "rating": int(review.get("rating") or 5),
+            "customer_name": review.get("customer_name"),
+            "review_text": review.get("review_text"),
+            "notes": review.get("notes"),
+            "order_id": review.get("order_id"),
+        }
+        existing = conn.execute(
+            """
+            SELECT id FROM reviews
+            WHERE review_date = :review_date
+              AND product_name = :product_name
+              AND rating = :rating
+              AND IFNULL(customer_name, '') = IFNULL(:customer_name, '')
+              AND IFNULL(review_text, '') = IFNULL(:review_text, '')
+              AND IFNULL(order_id, '') = IFNULL(:order_id, '')
+            """,
+            values,
+        ).fetchone()
+        if existing:
+            continue
+        conn.execute(
+            """
+            INSERT INTO reviews
+            (review_date, product_name, rating, customer_name, review_text, notes, order_id)
+            VALUES (
+                :review_date, :product_name, :rating, :customer_name,
+                :review_text, :notes, :order_id
+            )
+            """,
+            values,
+        )
+
+
+def ensure_bundled_sales(conn: sqlite3.Connection) -> None:
+    data_path = APP_DIR / "data" / "bundled_sales.json"
+    if not data_path.exists():
+        return
+    orders = json.loads(data_path.read_text(encoding="utf-8"))
+    for order in orders:
+        quantity = max(int(order.get("quantity") or 1), 1)
+        revenue = round(float(order.get("revenue") or 0), 2)
+        receipt_id = int(order["order_id"])
+        existing_actual = conn.execute(
+            """
+            SELECT id FROM sales
+            WHERE etsy_receipt_id = ?
+              AND product_type != 'imported_etsy_order'
+              AND etsy_transaction_id IS NOT NULL
+            """,
+            (receipt_id,),
+        ).fetchone()
+        if existing_actual:
+            continue
+        values = {
+            "sale_date": order["sale_date"],
+            "product_type": "imported_etsy_order",
+            "product_id": 0,
+            "product_name": order.get("product_name") or f"Etsy order {receipt_id}",
+            "quantity": quantity,
+            "unit_price": round(revenue / quantity, 2),
+            "unit_cost": 0,
+            "revenue": revenue,
+            "currency_code": "USD",
+            "etsy_receipt_id": receipt_id,
+            "etsy_transaction_id": None,
+        }
+        existing = conn.execute(
+            """
+            SELECT id FROM sales
+            WHERE etsy_receipt_id = ?
+              AND product_type = 'imported_etsy_order'
+              AND etsy_transaction_id IS NULL
+            """,
+            (receipt_id,),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE sales
+                SET sale_date = :sale_date, product_name = :product_name,
+                    quantity = :quantity, unit_price = :unit_price,
+                    unit_cost = :unit_cost, revenue = :revenue,
+                    currency_code = :currency_code
+                WHERE id = :id
+                """,
+                {**values, "id": existing["id"]},
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO sales
+                (
+                    sale_date, product_type, product_id, product_name, quantity,
+                    unit_price, unit_cost, revenue, currency_code,
+                    etsy_receipt_id, etsy_transaction_id
+                )
+                VALUES (
+                    :sale_date, :product_type, :product_id, :product_name,
+                    :quantity, :unit_price, :unit_cost, :revenue,
+                    :currency_code, :etsy_receipt_id, :etsy_transaction_id
+                )
+                """,
+                values,
+            )
+
+
 def ensure_bundled_filament_colors(conn: sqlite3.Connection) -> None:
     colors = [
         ("ZIRO Pastel Purple Matte PLA", "#BDA9F2", "matte PLA", 1, "filament"),
@@ -346,6 +598,38 @@ def ensure_bundled_filament_colors(conn: sqlite3.Connection) -> None:
     )
 
 
+def ensure_bundled_gel_polish_colors(conn: sqlite3.Connection) -> None:
+    data_path = APP_DIR / "data" / "bundled_gel_polish_colors.json"
+    if not data_path.exists():
+        return
+    colors = json.loads(data_path.read_text(encoding="utf-8"))
+    rows = [
+        (
+            color["name"],
+            color["hex_code"],
+            color.get("finish") or "matte",
+            color.get("brand") or "Beetles",
+            color.get("swatch_id"),
+            1,
+            "gel_polish",
+        )
+        for color in colors
+    ]
+    conn.executemany(
+        """
+        INSERT INTO colors (name, hex_code, finish, brand, swatch_id, in_stock, catalog_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(name, catalog_type) DO UPDATE SET
+            hex_code = excluded.hex_code,
+            finish = excluded.finish,
+            brand = excluded.brand,
+            swatch_id = excluded.swatch_id,
+            in_stock = excluded.in_stock
+        """,
+        rows,
+    )
+
+
 def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
     bundled = [
         {
@@ -358,9 +642,15 @@ def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
             "cost": 0.0,
             "quantity": 1,
             "reorder_level": 0,
-            "print_time": None,
+            "print_time": "Plate 1: 2h45m\nPlate 2: 3h32m\nPlate 3: 4h10m\nPlate 4: 1h51m\nPlate 5: 1h41m",
             "tags": "keychain,3D print,3MF,kawaii",
-            "materials": None,
+            "materials": (
+                "Plate 1: filament 1 white, 4 pink, 5 light pink | total 3.13 m / 9.49 g | 35 changes | cost 0.24\n"
+                "Plate 2: filament 1 white, 4 pink, 6 blue, 7 yellow | total 4.96 m / 15.02 g\n"
+                "Plate 3: filament 1 white, 4 pink, 5 light pink, 6 blue | total 5.15 m / 15.60 g | 57 changes | cost 0.39\n"
+                "Plate 4: filament 2 black, 3 gray | total 2.13 m / 6.47 g | 19 changes | cost 0.16\n"
+                "Plate 5: filament 1 white, 2 black, 3 gray | total 2.31 m / 6.99 g | 18 changes | cost 0.17"
+            ),
             "image_url": "assets/keychains/oyasumi_bakura_keychain.png",
             "image_urls": "assets/keychains/oyasumi_bakura_keychain.png",
             "model_file_path": "assets/keychains/oyasumi_bakura_keychain.3mf",
@@ -388,9 +678,9 @@ def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
                     cost = :cost,
                     quantity = :quantity,
                     reorder_level = :reorder_level,
-                    print_time = COALESCE(:print_time, print_time),
+                    print_time = COALESCE(print_time, :print_time),
                     tags = :tags,
-                    materials = :materials,
+                    materials = COALESCE(materials, :materials),
                     image_url = :image_url,
                     image_urls = :image_urls,
                     model_file_path = :model_file_path,
@@ -569,7 +859,7 @@ def etsy_api_headers() -> dict[str, str]:
     if creds["refresh_token"] and expires_at < int(time.time()):
         etsy_refresh_access_token()
         creds = etsy_get_credentials()
-    headers = {"x-api-key": f"{creds['keystring']}:{creds['shared_secret']}"}
+    headers = {"x-api-key": creds["keystring"]}
     if creds["access_token"]:
         headers["Authorization"] = f"Bearer {creds['access_token']}"
     return headers
@@ -632,6 +922,130 @@ def etsy_product_type_for(listing: dict) -> str:
     if "keychain" in text or "key chain" in text:
         return "keychains"
     return "press_on_nails"
+
+
+def etsy_money_value(value, fallback: float = 0) -> float:
+    if isinstance(value, dict):
+        amount = value.get("amount", fallback)
+        divisor = value.get("divisor") or 1
+        return float(amount or 0) / float(divisor)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(fallback)
+
+
+def etsy_money_currency(value, fallback: str = "USD") -> str:
+    if isinstance(value, dict):
+        return value.get("currency_code") or fallback
+    return fallback
+
+
+def etsy_receipt_date(receipt: dict, transaction: dict | None = None) -> str:
+    for source in (receipt, transaction or {}):
+        for key in (
+            "paid_timestamp",
+            "created_timestamp",
+            "create_timestamp",
+            "shipped_timestamp",
+        ):
+            timestamp = source.get(key)
+            if timestamp:
+                return datetime.fromtimestamp(int(timestamp)).date().isoformat()
+    return date.today().isoformat()
+
+
+def etsy_product_lookup(product_type: str, listing_id: int | None, title: str) -> tuple[int, float]:
+    table = "press_on_nails" if product_type == "press_on_nails" else "keychains"
+    with connect() as conn:
+        row = None
+        if listing_id:
+            row = conn.execute(
+                f"SELECT id, cost FROM {table} WHERE etsy_listing_id = ?",
+                (listing_id,),
+            ).fetchone()
+        if row is None and title:
+            row = conn.execute(
+                f"SELECT id, cost FROM {table} WHERE lower(name) = lower(?)",
+                (title,),
+            ).fetchone()
+        if row:
+            return int(row["id"]), float(row["cost"] or 0)
+    return 0, 0
+
+
+def etsy_upsert_sale_from_transaction(receipt: dict, transaction: dict) -> str:
+    receipt_id = int(receipt.get("receipt_id") or transaction.get("receipt_id") or 0)
+    transaction_id = int(transaction.get("transaction_id") or 0)
+    listing_id = transaction.get("listing_id")
+    listing_id = int(listing_id) if listing_id else None
+    title = etsy_clean(transaction.get("title")) or f"Etsy transaction {transaction_id or receipt_id}"
+    product_type = etsy_product_type_for({"title": title})
+    product_id, unit_cost = etsy_product_lookup(product_type, listing_id, title)
+    quantity = max(int(transaction.get("quantity") or 1), 1)
+    unit_price = etsy_money_value(transaction.get("price"))
+    if unit_price == 0 and receipt.get("grandtotal"):
+        unit_price = etsy_money_value(receipt.get("grandtotal")) / quantity
+    revenue = round(unit_price * quantity, 2)
+    currency = etsy_money_currency(transaction.get("price"), etsy_money_currency(receipt.get("grandtotal")))
+    sale_date = etsy_receipt_date(receipt, transaction)
+
+    with connect() as conn:
+        existing = None
+        if transaction_id:
+            existing = conn.execute(
+                "SELECT id FROM sales WHERE etsy_transaction_id = ?",
+                (transaction_id,),
+            ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE sales
+                SET sale_date = ?, product_type = ?, product_id = ?, product_name = ?,
+                    quantity = ?, unit_price = ?, unit_cost = ?, revenue = ?,
+                    currency_code = ?, etsy_receipt_id = ?
+                WHERE id = ?
+                """,
+                (
+                    sale_date,
+                    product_type,
+                    product_id,
+                    title,
+                    quantity,
+                    unit_price,
+                    unit_cost,
+                    revenue,
+                    currency,
+                    receipt_id or None,
+                    existing["id"],
+                ),
+            )
+            return "updated"
+        conn.execute(
+            """
+            INSERT INTO sales
+            (
+                sale_date, product_type, product_id, product_name, quantity,
+                unit_price, unit_cost, revenue, currency_code, etsy_receipt_id,
+                etsy_transaction_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sale_date,
+                product_type,
+                product_id,
+                title,
+                quantity,
+                unit_price,
+                unit_cost,
+                revenue,
+                currency,
+                receipt_id or None,
+                transaction_id or None,
+            ),
+        )
+    return "inserted"
 
 
 def etsy_import_listing(listing: dict, shop_id: str) -> str:
@@ -765,6 +1179,43 @@ def etsy_sync_listings() -> dict[str, int]:
     return counts
 
 
+def etsy_sync_revenue() -> dict[str, int]:
+    shop_id = etsy_find_shop_id()
+    counts = {"inserted": 0, "updated": 0, "receipts": 0}
+    offset = 0
+    while True:
+        data = etsy_get(
+            f"/shops/{shop_id}/receipts",
+            params={"limit": 100, "offset": offset, "was_paid": "true"},
+        )
+        receipts = data.get("results", [])
+        for receipt in receipts:
+            receipt_id = receipt.get("receipt_id")
+            if not receipt_id:
+                continue
+            counts["receipts"] += 1
+            transaction_data = etsy_get(f"/shops/{shop_id}/receipts/{receipt_id}/transactions")
+            transactions = transaction_data.get("results", [])
+            if transactions:
+                with connect() as conn:
+                    conn.execute(
+                        """
+                        DELETE FROM sales
+                        WHERE etsy_receipt_id = ?
+                          AND product_type = 'imported_etsy_order'
+                          AND etsy_transaction_id IS NULL
+                        """,
+                        (receipt_id,),
+                    )
+            for transaction in transactions:
+                result = etsy_upsert_sale_from_transaction(receipt, transaction)
+                counts[result] += 1
+        if len(receipts) < 100:
+            break
+        offset += 100
+    return counts
+
+
 def get_colors(catalog_type: str | None = None) -> pd.DataFrame:
     if catalog_type is None:
         return query_df("SELECT * FROM colors ORDER BY name")
@@ -805,8 +1256,14 @@ def summarize_sales(sales: pd.DataFrame) -> dict[str, float]:
         return {"revenue": 0, "profit": 0, "orders": 0, "units": 0, "avg_order": 0}
     revenue = float(sales["revenue"].sum())
     profit = float((sales["revenue"] - sales["quantity"] * sales["unit_cost"]).sum())
-    orders = int(len(sales))
-    units = int(sales["quantity"].sum())
+    order_sales = sales[sales["product_type"] != "manual_revenue"] if "product_type" in sales.columns else sales
+    if "etsy_receipt_id" in sales.columns:
+        etsy_orders = order_sales["etsy_receipt_id"].dropna()
+        manual_orders = order_sales["etsy_receipt_id"].isna().sum()
+        orders = int(etsy_orders.nunique() + manual_orders)
+    else:
+        orders = int(len(order_sales))
+    units = int(order_sales["quantity"].sum()) if not order_sales.empty else 0
     return {
         "revenue": revenue,
         "profit": profit,
@@ -829,10 +1286,119 @@ def restock(table: str, product_id: int, qty: int) -> None:
         conn.execute(f"UPDATE {table} SET quantity = quantity + ? WHERE id = ?", (qty, product_id))
 
 
+def add_manual_revenue(revenue_date: date, amount: float, label: str) -> None:
+    clean_label = label.strip() or f"Manual Etsy revenue {revenue_date.strftime('%Y-%m')}"
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO sales
+            (
+                sale_date, product_type, product_id, product_name, quantity,
+                unit_price, unit_cost, revenue, currency_code
+            )
+            VALUES (?, 'manual_revenue', 0, ?, 0, ?, 0, ?, 'USD')
+            """,
+            (revenue_date.isoformat(), clean_label, amount, amount),
+        )
+
+
+def delete_manual_revenue(sale_id: int) -> None:
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM sales WHERE id = ? AND product_type = 'manual_revenue'",
+            (sale_id,),
+        )
+
+
 def update_keychain_print_time(product_id: int, print_time: str | None) -> None:
     clean_time = print_time.strip() if print_time else None
     with connect() as conn:
         conn.execute("UPDATE keychains SET print_time = ? WHERE id = ?", (clean_time or None, product_id))
+
+
+def update_keychain_production_details(
+    product_id: int,
+    print_time: str | None,
+    materials: str | None,
+) -> None:
+    clean_time = print_time.strip() if print_time else None
+    clean_materials = materials.strip() if materials else None
+    with connect() as conn:
+        conn.execute(
+            "UPDATE keychains SET print_time = ?, materials = ? WHERE id = ?",
+            (clean_time or None, clean_materials or None, product_id),
+        )
+
+
+def print_time_summary(print_time: str | None) -> str:
+    if not print_time:
+        return "Not set"
+    lines = [line.strip() for line in str(print_time).splitlines() if line.strip()]
+    if len(lines) > 1:
+        return f"{len(lines)} plate times"
+    return lines[0] if lines else "Not set"
+
+
+def multiline_summary(value: str | None, item_name: str) -> str:
+    if not value:
+        return "Not set"
+    lines = [line.strip() for line in str(value).splitlines() if line.strip()]
+    if len(lines) > 1:
+        return f"{len(lines)} {item_name}"
+    return lines[0] if lines else "Not set"
+
+
+def clean_multiline_lines(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [line.strip() for line in str(value).splitlines() if line.strip()]
+
+
+def parse_print_time_minutes(line: str) -> int | None:
+    time_text = str(line).lower().split(":", 1)[-1]
+    hours = sum(int(match.group(1)) for match in re.finditer(r"(\d+)\s*h", time_text))
+    minutes = sum(int(match.group(1)) for match in re.finditer(r"(\d+)\s*m", time_text))
+    if not hours and not minutes:
+        return None
+    return hours * 60 + minutes
+
+
+def format_print_time_total(total_minutes: int) -> str:
+    hours, minutes = divmod(total_minutes, 60)
+    if hours and minutes:
+        return f"{hours}h{minutes:02d}m"
+    if hours:
+        return f"{hours}h"
+    return f"{minutes}m"
+
+
+def total_print_time_summary(time_lines: list[str]) -> str | None:
+    durations = [parse_print_time_minutes(line) for line in time_lines]
+    total_minutes = sum(duration for duration in durations if duration is not None)
+    if total_minutes <= 0:
+        return None
+    return format_print_time_total(total_minutes)
+
+
+def render_keychain_production_panel(print_time: str | None, materials: str | None) -> None:
+    time_lines = clean_multiline_lines(print_time)
+    material_lines = clean_multiline_lines(materials)
+    if not time_lines and not material_lines:
+        st.caption("Production details not set.")
+        return
+
+    st.markdown("**Production details**")
+    if time_lines:
+        st.caption("Plate print times")
+        total_time = total_print_time_summary(time_lines)
+        if total_time:
+            st.metric("Total print time", total_time)
+        for line in time_lines:
+            st.markdown(f"- {html.escape(line)}")
+    if material_lines:
+        st.caption("Plate colors / filament")
+        for line in material_lines:
+            st.markdown(f"- {html.escape(line)}")
 
 
 def add_product(product_type: str, payload: dict) -> None:
@@ -964,17 +1530,58 @@ def add_color(
     name: str,
     hex_code: str,
     finish: str,
+    brand: str,
+    swatch_id: str,
     in_stock: bool,
     catalog_type: str,
 ) -> None:
     with connect() as conn:
         conn.execute(
             """
-            INSERT INTO colors (name, hex_code, finish, in_stock, catalog_type)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO colors (name, hex_code, finish, brand, swatch_id, in_stock, catalog_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (name, hex_code, finish, int(in_stock), catalog_type),
+            (name, hex_code, finish, brand or None, swatch_id or None, int(in_stock), catalog_type),
         )
+
+
+def update_color_stock(color_id: int, in_stock: bool) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE colors SET in_stock = ? WHERE id = ?",
+            (int(in_stock), color_id),
+        )
+
+
+def color_text(hex_code: str) -> str:
+    clean = hex_code.strip().lstrip("#")
+    if len(clean) == 3:
+        clean = "".join(ch * 2 for ch in clean)
+    try:
+        r, g, b = int(clean[0:2], 16), int(clean[2:4], 16), int(clean[4:6], 16)
+    except (ValueError, IndexError):
+        return "#1B1B1B"
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b)
+    return "#1B1B1B" if luminance > 150 else "#FFFFFF"
+
+
+def hex_to_rgb(hex_code: str) -> tuple[int, int, int]:
+    clean = str(hex_code).strip().lstrip("#")
+    if len(clean) == 3:
+        clean = "".join(ch * 2 for ch in clean)
+    return int(clean[0:2], 16), int(clean[2:4], 16), int(clean[4:6], 16)
+
+
+def color_shade_sort_key(hex_code: str) -> tuple[float, float, float, float]:
+    try:
+        r, g, b = hex_to_rgb(hex_code)
+    except (ValueError, IndexError):
+        return (9, 0, 0, 0)
+    hue, saturation, value = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    lightness = (max(r, g, b) + min(r, g, b)) / 510
+    if saturation < 0.14:
+        return (0, lightness, saturation, value)
+    return (1, hue, saturation, value)
 
 
 def style_page() -> None:
@@ -984,14 +1591,21 @@ def style_page() -> None:
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&display=swap');
         :root {{
             --brand-primary: {BRAND_PRIMARY};
-            --brand-bg: #fff8fa;
+            --brand-bg: #ffffff;
             --display-font: "Cormorant Garamond", Georgia, "Times New Roman", serif;
         }}
         .stApp {{
-            background: var(--brand-bg);
+            background: #ffffff;
+        }}
+        [data-testid="stAppViewContainer"] {{
+            background: #ffffff;
+        }}
+        [data-testid="stSidebar"] {{
+            background: #ffffff;
         }}
         [data-testid="stHeader"] {{
-            background: rgba(255, 248, 250, 0.88);
+            background: rgba(255, 255, 255, 0.94);
+            backdrop-filter: blur(6px);
         }}
         h1, h2, h3 {{
             font-family: var(--display-font);
@@ -1003,21 +1617,21 @@ def style_page() -> None:
             line-height: 1.08;
         }}
         div[data-testid="stMetric"] {{
-            background: #ffffff;
+            background: rgba(255, 255, 255, 0.9);
             border: 1px solid rgba(183, 110, 121, 0.18);
             border-radius: 8px;
             padding: 0.85rem 0.9rem;
             box-shadow: 0 1px 8px rgba(27, 27, 27, 0.05);
         }}
         .stock-card {{
-            background: #ffffff;
+            background: rgba(255, 255, 255, 0.9);
             border: 1px solid rgba(27, 27, 27, 0.08);
             border-radius: 8px;
             padding: 0.85rem;
             margin-bottom: 0.7rem;
         }}
         .nail-grid-card {{
-            background: #ffffff;
+            background: rgba(255, 255, 255, 0.9);
             border: 1px solid rgba(27, 27, 27, 0.08);
             border-radius: 8px;
             padding: 0.8rem;
@@ -1040,7 +1654,7 @@ def style_page() -> None:
         }}
         .nail-image-placeholder {{
             align-items: center;
-            background: #ffffff;
+            background: rgba(255, 255, 255, 0.82);
             border: 1px dashed rgba(183, 110, 121, 0.32);
             border-radius: 8px;
             color: rgba(27, 27, 27, 0.48);
@@ -1052,7 +1666,7 @@ def style_page() -> None:
         }}
         .low {{
             border-color: rgba(210, 4, 45, 0.32);
-            background: #fff5f7;
+            background: rgba(255, 245, 247, 0.92);
         }}
         .swatch {{
             width: 18px;
@@ -1062,6 +1676,54 @@ def style_page() -> None:
             vertical-align: -3px;
             border: 1px solid rgba(0,0,0,0.18);
             margin-right: 8px;
+        }}
+        .swatch-chart {{
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid rgba(27, 27, 27, 0.08);
+            border-radius: 8px;
+            padding: 0.9rem;
+            margin-bottom: 1rem;
+        }}
+        .swatch-chart-title {{
+            color: rgba(27, 27, 27, 0.72);
+            font-size: 0.88rem;
+            font-weight: 700;
+            margin: 0 0 0.65rem;
+            text-transform: uppercase;
+        }}
+        .swatch-grid {{
+            display: grid;
+            gap: 0.65rem;
+            grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+        }}
+        .swatch-tile {{
+            border: 1px solid rgba(27, 27, 27, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+            min-height: 128px;
+            background: #fff;
+        }}
+        .swatch-chip {{
+            border-bottom: 1px solid rgba(27, 27, 27, 0.1);
+            height: 58px;
+        }}
+        .swatch-meta {{
+            padding: 0.45rem 0.5rem 0.55rem;
+        }}
+        .swatch-meta strong {{
+            display: block;
+            font-size: 0.82rem;
+            line-height: 1.12;
+        }}
+        .swatch-meta small {{
+            color: rgba(27, 27, 27, 0.62);
+            display: block;
+            font-size: 0.72rem;
+            line-height: 1.2;
+            margin-top: 0.2rem;
+        }}
+        .swatch-out {{
+            outline: 2px solid rgba(210, 4, 45, 0.42);
         }}
         @media (max-width: 640px) {{
             .block-container {{
@@ -1086,18 +1748,19 @@ def render_header() -> None:
 
 
 def render_overview() -> None:
-    sales = get_sales(date.today() - timedelta(days=90), date.today())
-    summary = summarize_sales(sales)
-    cols = st.columns(4)
-    cols[0].metric("Revenue", money(summary["revenue"]))
-    cols[1].metric("Profit", money(summary["profit"]))
-    cols[2].metric("Orders", f"{summary['orders']:,.0f}")
-    cols[3].metric("Units sold", f"{summary['units']:,.0f}")
+    sales = get_sales(etsy_history_start(), date.today())
 
-    low_stock = low_stock_df()
-    if not low_stock.empty:
-        labels = ", ".join(f"{r.name} ({r.quantity})" for r in low_stock.itertuples())
-        st.error(f"Low stock: {labels}")
+    shop_stats = load_shop_stats()
+    if shop_stats:
+        st.subheader("Shop stats")
+        st.caption(f"{shop_stats.get('date_range', 'All time')} | {shop_stats.get('updated_label', 'Updated')}")
+        stat_cols = st.columns(6)
+        stat_cols[0].metric("Etsy revenue", money(float(shop_stats.get("revenue", 0))))
+        stat_cols[1].metric("Orders", f"{int(shop_stats.get('orders', 0)):,.0f}")
+        stat_cols[2].metric("Sales", f"{int(shop_stats.get('sales', 0)):,.0f}")
+        stat_cols[3].metric("Favorites", f"{int(shop_stats.get('favorites', 0)):,.0f}")
+        stat_cols[4].metric("Total views", compact_number(shop_stats.get("total_views", 0)))
+        stat_cols[5].metric("Visits", f"{int(shop_stats.get('visits', 0)):,.0f}")
 
     if sales.empty:
         st.info("No sales yet.")
@@ -1105,28 +1768,10 @@ def render_overview() -> None:
 
     sales["sale_date"] = pd.to_datetime(sales["sale_date"])
     daily = sales.groupby("sale_date", as_index=False)["revenue"].sum()
-    by_type = sales.groupby("product_type", as_index=False)["revenue"].sum()
-    by_type["product_type"] = by_type["product_type"].map(
-        {"press_on_nails": "Press-on nails", "keychains": "Keychains"}
-    )
-
-    chart_col, pie_col = st.columns([1.35, 1])
-    with chart_col:
-        st.subheader("Revenue trend")
-        fig = px.line(daily, x="sale_date", y="revenue", color_discrete_sequence=[BRAND_PRIMARY])
-        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=300, yaxis_title=None, xaxis_title=None)
-        st.plotly_chart(fig, width="stretch")
-    with pie_col:
-        st.subheader("Product-line split")
-        fig = px.pie(
-            by_type,
-            names="product_type",
-            values="revenue",
-            hole=0.48,
-            color_discrete_sequence=CHART_COLORS,
-        )
-        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=300)
-        st.plotly_chart(fig, width="stretch")
+    st.subheader("Revenue trend")
+    fig = px.line(daily, x="sale_date", y="revenue", color_discrete_sequence=[BRAND_PRIMARY])
+    fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=300, yaxis_title=None, xaxis_title=None)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_etsy_api() -> None:
@@ -1175,7 +1820,7 @@ def render_etsy_api() -> None:
         scopes = st.multiselect(
             "Scopes",
             ["listings_r", "shops_r", "transactions_r", "feedback_r"],
-            default=["listings_r", "shops_r"],
+            default=["listings_r", "shops_r", "transactions_r"],
             key="etsy_scopes",
         )
         if st.button("Generate Etsy authorization link", width="stretch"):
@@ -1207,7 +1852,7 @@ def render_etsy_api() -> None:
             set_setting("etsy_shop_id", manual_shop_id.strip() or None)
             st.success("Shop ID saved.")
             st.rerun()
-        sync_cols = st.columns(2)
+        sync_cols = st.columns(3)
         if sync_cols[0].button("Refresh token", width="stretch", disabled=not bool(creds["refresh_token"])):
             try:
                 etsy_refresh_access_token()
@@ -1219,6 +1864,23 @@ def render_etsy_api() -> None:
             try:
                 counts = etsy_sync_listings()
                 st.success(f"Synced Etsy listings: {counts['inserted']} inserted, {counts['updated']} updated.")
+            except Exception as exc:
+                st.error(str(exc))
+        if sync_cols[2].button("Sync revenue", width="stretch", disabled=not connected):
+            try:
+                counts = etsy_sync_revenue()
+                st.success(
+                    "Synced Etsy revenue: "
+                    f"{counts['receipts']} receipts checked, "
+                    f"{counts['inserted']} sales inserted, "
+                    f"{counts['updated']} sales updated."
+                )
+            except requests.HTTPError as exc:
+                st.error(
+                    "Etsy did not allow the revenue sync. Reconnect OAuth with the "
+                    "transactions_r scope checked, then try again. "
+                    f"Details: {exc}"
+                )
             except Exception as exc:
                 st.error(str(exc))
 
@@ -1254,6 +1916,20 @@ def render_inventory_export(table: str, products: pd.DataFrame) -> None:
     )
 
 
+def display_image_source(image_url: str | None, image_urls: str | None = None):
+    candidates = []
+    if image_url:
+        candidates.append(str(image_url).strip())
+    if image_urls:
+        candidates.extend(url.strip() for url in str(image_urls).split(",") if url.strip())
+    if not candidates:
+        return None
+    source = candidates[0]
+    if source.startswith(("http://", "https://")):
+        return source.replace("il_fullxfull.", "il_570xN.")
+    return APP_DIR / source
+
+
 def render_nails_grid(products: pd.DataFrame) -> None:
     columns_per_row = 3
     for start in range(0, len(products), columns_per_row):
@@ -1261,12 +1937,12 @@ def render_nails_grid(products: pd.DataFrame) -> None:
         for col, product in zip(cols, products.iloc[start : start + columns_per_row].itertuples()):
             with col:
                 description = getattr(product, "description", None) or ""
-                image_url = getattr(product, "image_url", None)
-                display_image = image_url
-                if image_url and not str(image_url).startswith(("http://", "https://")):
-                    display_image = APP_DIR / str(image_url)
+                display_image = display_image_source(
+                    getattr(product, "image_url", None),
+                    getattr(product, "image_urls", None),
+                )
                 if display_image:
-                    st.image(display_image, use_container_width=True)
+                    st.image(display_image, width="stretch")
                 else:
                     st.markdown('<div class="nail-image-placeholder">No image</div>', unsafe_allow_html=True)
                 st.markdown(
@@ -1323,52 +1999,30 @@ def render_inventory_table(product_type: str) -> None:
     for product in products.itertuples():
         low = product.quantity <= product.reorder_level
         card_class = "stock-card low" if low else "stock-card"
-        status = "Low stock" if low else "In stock"
-        sku_text = f" | SKU: {product.sku}" if show_inventory_numbers and getattr(product, "sku", None) else ""
-        description = getattr(product, "description", None) or ""
-        image_url = getattr(product, "image_url", None)
         model_file_path = getattr(product, "model_file_path", None)
         print_time = getattr(product, "print_time", None)
-        display_image = image_url
-        if image_url and not str(image_url).startswith(("http://", "https://")):
-            display_image = APP_DIR / str(image_url)
-        card_meta = f"{product.descriptor} | {product.color_name or 'No color'}"
-        if show_inventory_numbers:
-            card_meta = f"{card_meta} | {money(product.price)} | {status}{sku_text}"
-            card_meta = f"{card_meta} | Print time: {print_time or 'Not set'}"
+        materials = getattr(product, "materials", None)
+        display_image = display_image_source(
+            getattr(product, "image_url", None),
+            getattr(product, "image_urls", None),
+        )
         st.markdown(
             f"""
             <div class="{card_class}">
-                <strong><span class="swatch" style="background:{product.hex_code or BRAND_PRIMARY}"></span>{product.name}</strong><br>
-                <small>{card_meta}</small>
-                {f"<br><strong>{product.quantity}</strong> units on hand, reorder at {product.reorder_level}" if show_inventory_numbers else ""}
+                <strong>{product.name}</strong>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        if display_image or description:
+        if display_image or print_time or materials:
             detail_cols = st.columns([1, 2]) if display_image else st.columns([1])
             if display_image:
                 detail_cols[0].image(display_image, width=160)
-                detail_cols[1].caption(description)
+                with detail_cols[1]:
+                    render_keychain_production_panel(print_time, materials)
             else:
-                detail_cols[0].caption(description)
-        listing_details = {
-            "Tags": getattr(product, "tags", None),
-            "Materials": getattr(product, "materials", None),
-            "Variation 1": " - ".join(
-                v for v in [getattr(product, "variation_1_name", None), getattr(product, "variation_1_values", None)] if v
-            ),
-            "Variation 2": " - ".join(
-                v for v in [getattr(product, "variation_2_name", None), getattr(product, "variation_2_values", None)] if v
-            ),
-            "Images": getattr(product, "image_urls", None),
-        }
-        if any(listing_details.values()):
-            with st.expander(f"Etsy listing details for {product.name}", expanded=False):
-                for label, value in listing_details.items():
-                    if value:
-                        st.markdown(f"**{label}:** {value}")
+                with detail_cols[0]:
+                    render_keychain_production_panel(print_time, materials)
         if model_file_path:
             model_path = APP_DIR / model_file_path
             if model_path.exists():
@@ -1382,25 +2036,6 @@ def render_inventory_table(product_type: str) -> None:
                 )
             else:
                 st.warning(f"Missing 3MF file: {model_file_path}")
-        if show_inventory_numbers:
-            with st.expander(f"Print time for {product.name}", expanded=False):
-                edited_print_time = st.text_input(
-                    "Print time",
-                    value=print_time or "",
-                    placeholder="2h 35m",
-                    key=f"print_time_{table}_{product.id}",
-                )
-                if st.button("Save print time", key=f"btn_print_time_{table}_{product.id}", width="stretch"):
-                    update_keychain_print_time(int(product.id), edited_print_time)
-                    st.success("Print time saved.")
-                    st.rerun()
-            with st.expander(f"Restock {product.name}", expanded=False):
-                qty = st.number_input("Units to add", min_value=1, max_value=999, value=10, key=f"restock_{table}_{product.id}")
-                if st.button("Add stock", key=f"btn_restock_{table}_{product.id}", width="stretch"):
-                    restock(table, int(product.id), int(qty))
-                    st.success(f"Added {qty} units to {product.name}.")
-                    st.rerun()
-
     export_cols = [
         col
         for col in [
@@ -1452,12 +2087,24 @@ def render_add_product(product_type: str) -> None:
                 quantity = 0
                 reorder = 1
                 print_time = ""
+                materials = ""
             else:
                 price = st.number_input("Etsy price", min_value=0.0, value=20.0, step=1.0, key=f"{product_type}_price")
                 cost = st.number_input("Cost to make", min_value=0.0, value=5.0, step=0.5, key=f"{product_type}_cost")
                 quantity = st.number_input("Quantity", min_value=0, value=10, step=1, key=f"{product_type}_quantity")
                 reorder = st.number_input("Reorder level", min_value=0, value=5, step=1, key=f"{product_type}_reorder")
-                print_time = st.text_input("Print time", placeholder="2h 35m", key=f"{product_type}_print_time")
+                print_time = st.text_area(
+                    "Plate print times",
+                    placeholder="Plate 1: 2h 10m\nPlate 2: 1h 45m\nPlate 3: 2h 05m\nPlate 4: 1h 30m",
+                    key=f"{product_type}_print_time",
+                    height=120,
+                )
+                materials = st.text_area(
+                    "Plate colors / filament",
+                    placeholder="Plate 1: filament 1 white, 4 pink, 5 light pink",
+                    key=f"{product_type}_materials",
+                    height=120,
+                )
             payload = {
                 "name": name.strip(),
                 "color_id": color_options[color_name],
@@ -1466,6 +2113,7 @@ def render_add_product(product_type: str) -> None:
                 "quantity": int(quantity),
                 "reorder_level": int(reorder),
                 "print_time": print_time.strip() if not is_nail and print_time.strip() else None,
+                "materials": materials.strip() if not is_nail and materials.strip() else None,
             }
             if is_nail:
                 payload["shape"] = st.selectbox(
@@ -1553,11 +2201,61 @@ def render_inventory() -> None:
         render_legacy_add_product()
 
 
+def render_manual_revenue_tools(start: date, end: date, expanded: bool = False) -> None:
+    with st.expander("Manual revenue", expanded=expanded):
+        with st.form("manual_revenue_form", clear_on_submit=True):
+            revenue_date = st.date_input(
+                "Date",
+                value=end,
+                min_value=start,
+                max_value=end,
+                key="manual_revenue_date",
+            )
+            amount = st.number_input(
+                "Revenue",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                format="%.2f",
+                key="manual_revenue_amount",
+            )
+            label = st.text_input(
+                "Label",
+                value=f"Manual Etsy revenue {revenue_date.strftime('%Y-%m')}",
+                key="manual_revenue_label",
+            )
+            submitted = st.form_submit_button("Add manual revenue", width="stretch")
+        if submitted:
+            if amount <= 0:
+                st.warning("Enter a revenue amount above $0.")
+            else:
+                add_manual_revenue(revenue_date, float(amount), label)
+                st.success("Manual revenue added.")
+                st.rerun()
+
+        manual = get_sales(start, end)
+        manual = manual[manual["product_type"] == "manual_revenue"] if not manual.empty else manual
+        if manual.empty:
+            return
+        st.markdown("**Manual entries**")
+        for row in manual.sort_values("sale_date", ascending=False).itertuples():
+            cols = st.columns([1, 2, 1, 0.7])
+            cols[0].write(row.sale_date)
+            cols[1].write(row.product_name)
+            cols[2].write(money(float(row.revenue)))
+            if cols[3].button("Remove", key=f"delete_manual_revenue_{row.id}"):
+                delete_manual_revenue(int(row.id))
+                st.success("Manual revenue removed.")
+                st.rerun()
+
+
 def render_revenue() -> None:
     bounds = query_df("SELECT MIN(sale_date) AS start_date, MAX(sale_date) AS end_date FROM sales").iloc[0]
-    min_date = pd.to_datetime(bounds["start_date"]).date() if bounds["start_date"] else date.today() - timedelta(days=90)
-    max_date = pd.to_datetime(bounds["end_date"]).date() if bounds["end_date"] else date.today()
-    default_start = max(min_date, max_date - timedelta(days=90))
+    history_start = etsy_history_start()
+    first_sale_date = pd.to_datetime(bounds["start_date"]).date() if bounds["start_date"] else None
+    min_date = min(first_sale_date, history_start) if first_sale_date else history_start
+    max_date = max(pd.to_datetime(bounds["end_date"]).date(), date.today()) if bounds["end_date"] else date.today()
+    default_start = history_start
 
     filters = st.columns(2)
     start = filters[0].date_input("Start", value=default_start, min_value=min_date, max_value=max_date)
@@ -1573,6 +2271,8 @@ def render_revenue() -> None:
     cols[1].metric("Profit", money(summary["profit"]))
     cols[2].metric("Avg. order", money(summary["avg_order"]))
     cols[3].metric("Orders", f"{summary['orders']:,.0f}")
+
+    render_manual_revenue_tools(min_date, max_date, expanded=sales.empty)
 
     if sales.empty:
         st.info("No sales in this range.")
@@ -1673,34 +2373,119 @@ def render_reviews() -> None:
     )
 
 
+def render_gel_polish_swatch_chart(colors: pd.DataFrame) -> None:
+    sorted_colors = sorted(
+        list(colors.itertuples()),
+        key=lambda color: (
+            color_shade_sort_key(color.hex_code),
+            str(getattr(color, "swatch_id", "") or ""),
+            str(color.name).lower(),
+        ),
+    )
+    st.caption("All gel polish colors sorted by shade")
+    columns_per_row = 6
+    for row_start in range(0, len(sorted_colors), columns_per_row):
+        row_colors = sorted_colors[row_start : row_start + columns_per_row]
+        columns = st.columns(columns_per_row)
+        for column, color in zip(columns, row_colors):
+            with column:
+                hex_code = str(color.hex_code)
+                if not hex_code.startswith("#"):
+                    hex_code = f"#{hex_code}"
+                swatch_id = getattr(color, "swatch_id", None)
+                name = f"#{swatch_id} {color.name}" if swatch_id else str(color.name)
+                brand = getattr(color, "brand", None)
+                finish = getattr(color, "finish", None)
+                stock = "OUT" if not bool(color.in_stock) else "In stock"
+                st.color_picker(
+                    f"Swatch {color.id}",
+                    value=hex_code,
+                    key=f"gel_polish_chart_color_{color.id}",
+                    disabled=True,
+                    label_visibility="collapsed",
+                )
+                st.markdown(f"**{name}**")
+                details = [hex_code]
+                if brand:
+                    details.append(str(brand))
+                if finish:
+                    details.append(str(finish))
+                details.append(stock)
+                st.caption(" | ".join(details))
+
+
 def render_catalog(catalog_type: str, title: str) -> None:
     colors = get_colors(catalog_type)
     st.subheader(title)
+    if catalog_type == "gel_polish" and not colors.empty:
+        out_colors = colors[colors["in_stock"] == 0]
+        if not out_colors.empty:
+            st.subheader("Reorder ASAP")
+            for color in out_colors.itertuples():
+                brand = getattr(color, "brand", None)
+                brand_text = f" | {brand}" if brand else ""
+                swatch_id = getattr(color, "swatch_id", None)
+                swatch_text = f" | Swatch {swatch_id}" if swatch_id else ""
+                st.markdown(
+                    f"""
+                    <div class="stock-card low">
+                        <strong><span class="swatch" style="background:{color.hex_code}"></span>{color.name}</strong><br>
+                        <small>{color.hex_code} | {color.finish}{brand_text}{swatch_text}</small>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+    if catalog_type == "gel_polish" and not colors.empty:
+        with st.expander("Open large swatch chart", expanded=False):
+            render_gel_polish_swatch_chart(colors)
+
     for color in colors.itertuples():
-        status = "In stock" if color.in_stock else "Out of stock"
-        st.markdown(
-            f"""
-            <div class="stock-card">
-                <strong><span class="swatch" style="background:{color.hex_code}"></span>{color.name}</strong><br>
-                <small>{color.hex_code} | {color.finish} | {status}</small>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        in_stock = bool(color.in_stock)
+        status = "In stock" if in_stock else "OUT"
+        brand = getattr(color, "brand", None)
+        swatch_id = getattr(color, "swatch_id", None)
+        details = [color.hex_code, color.finish, status]
+        if brand:
+            details.insert(2, brand)
+        if swatch_id:
+            details.insert(-1, f"Swatch {swatch_id}")
+        card_class = "stock-card" if in_stock else "stock-card low"
+        cols = st.columns([1, 0.22])
+        with cols[0]:
+            st.markdown(
+                f"""
+                <div class="{card_class}">
+                    <strong><span class="swatch" style="background:{color.hex_code}"></span>{color.name}</strong><br>
+                    <small>{" | ".join(str(item) for item in details)}</small>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            button_label = "Mark OUT" if in_stock else "Mark in stock"
+            if st.button(button_label, key=f"stock_{catalog_type}_{color.id}", width="stretch"):
+                update_color_stock(int(color.id), not in_stock)
+                st.rerun()
     if colors.empty:
         st.info("No colors added yet.")
 
     with st.expander("Add color", expanded=False):
         with st.form(f"{catalog_type}_color_form", clear_on_submit=True):
-            name = st.text_input("Color name", key=f"{catalog_type}_color_name")
+            name_label = "Nickname" if catalog_type == "gel_polish" else "Color name"
+            name = st.text_input(name_label, key=f"{catalog_type}_color_name")
             hex_code = st.text_input("Hex code", value="#FFB7D5", key=f"{catalog_type}_hex")
             if catalog_type == "gel_polish":
-                finish_options = ["glossy", "matte", "chrome", "glitter", "cat eye", "jelly"]
-                finish_label = "Finish"
+                finish_options = ["gel", "regular lacquer", "glossy", "matte", "chrome", "glitter", "cat eye", "jelly"]
+                finish_label = "Type of polish"
             else:
                 finish_options = ["PLA", "PLA+", "PETG", "TPU", "ABS", "silk PLA", "matte PLA", "glitter PLA"]
                 finish_label = "Material / finish"
             finish = st.selectbox(finish_label, finish_options, key=f"{catalog_type}_finish")
+            brand = st.text_input("Brand", key=f"{catalog_type}_brand")
+            swatch_id = ""
+            if catalog_type == "gel_polish":
+                swatch_id = st.text_input("Swatch ID", key=f"{catalog_type}_swatch_id")
             in_stock = st.checkbox("In stock", value=True, key=f"{catalog_type}_in_stock")
             submitted = st.form_submit_button("Save color", width="stretch")
         if submitted:
@@ -1708,7 +2493,15 @@ def render_catalog(catalog_type: str, title: str) -> None:
                 st.warning("Use a color name and a hex code like #FFB7D5.")
             else:
                 try:
-                    add_color(name.strip(), hex_code.strip(), finish, in_stock, catalog_type)
+                    add_color(
+                        name.strip(),
+                        hex_code.strip(),
+                        finish,
+                        brand.strip(),
+                        swatch_id.strip(),
+                        in_stock,
+                        catalog_type,
+                    )
                     st.success(f"Saved {name}.")
                     st.rerun()
                 except sqlite3.IntegrityError:
@@ -1727,7 +2520,6 @@ def main() -> None:
         filament,
         revenue,
         reviews,
-        sales,
         etsy_api,
     ) = st.tabs(
         [
@@ -1738,7 +2530,6 @@ def main() -> None:
             "3D Filament Colors",
             "Revenue",
             "Reviews",
-            "Log Sales",
             "Etsy API",
         ]
     )
@@ -1756,8 +2547,6 @@ def main() -> None:
         render_revenue()
     with reviews:
         render_reviews()
-    with sales:
-        render_sale_entry()
     with etsy_api:
         render_etsy_api()
 

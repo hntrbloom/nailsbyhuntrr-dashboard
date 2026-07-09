@@ -1,0 +1,162 @@
+[
+  {
+    "sale_date": "2026-04-20",
+    "order_id": "4033686670",
+    "customer_name": "Jamie W",
+    "product_name": "MLP Character Nail Set",
+    "quantity": 1,
+    "revenue": 99.95
+  },
+  {
+    "sale_date": "2025-10-12",
+    "order_id": "3825016180",
+    "customer_name": "Taylor Zalme",
+    "product_name": "Pink and Black Bladee & Ecco2k Nail Set",
+    "quantity": 1,
+    "revenue": 48.71
+  },
+  {
+    "sale_date": "2025-10-06",
+    "order_id": "3819081212",
+    "customer_name": "krystal duran",
+    "product_name": "Draculaura Monster High Themed Nail Set",
+    "quantity": 1,
+    "revenue": 49.84
+  },
+  {
+    "sale_date": "2025-10-02",
+    "order_id": "3814243404",
+    "customer_name": "Casp Reynolds",
+    "product_name": "Draculaura Monster High Themed Nail Set",
+    "quantity": 1,
+    "revenue": 58.03
+  },
+  {
+    "sale_date": "2025-09-13",
+    "order_id": "3796265878",
+    "customer_name": "Bianca Hudson",
+    "product_name": "Skull Y2K Pink and Black Nail Set",
+    "quantity": 1,
+    "revenue": 44.94
+  },
+  {
+    "sale_date": "2025-09-04",
+    "order_id": "3790686181",
+    "customer_name": "ain.sleepy",
+    "product_name": "Skull Y2K Pink and Black Nail Set",
+    "quantity": 1,
+    "revenue": 40.07
+  },
+  {
+    "sale_date": "2025-08-02",
+    "order_id": "3759673291",
+    "customer_name": "michelle lozano",
+    "product_name": "Skull Y2K Pink and Black Nail Set",
+    "quantity": 1,
+    "revenue": 44.2
+  },
+  {
+    "sale_date": "2025-08-03",
+    "order_id": "3759789205",
+    "customer_name": "Sign in with Apple user",
+    "product_name": "Skull Y2K Pink and Black Nail Set",
+    "quantity": 1,
+    "revenue": 43.9
+  },
+  {
+    "sale_date": "2025-07-29",
+    "order_id": "3756117667",
+    "customer_name": "Linda",
+    "product_name": "Skull Y2K Pink and Black Nail Set",
+    "quantity": 1,
+    "revenue": 38.97
+  },
+  {
+    "sale_date": "2025-08-01",
+    "order_id": "3758506223",
+    "customer_name": "olivia",
+    "product_name": "Pink Domo-Kun Nail Set",
+    "quantity": 1,
+    "revenue": 37.93
+  },
+  {
+    "sale_date": "2025-07-24",
+    "order_id": "3745181102",
+    "customer_name": "ain.sleepy",
+    "product_name": "Pink and Black Y2K Nails",
+    "quantity": 1,
+    "revenue": 37.1
+  },
+  {
+    "sale_date": "2025-06-04",
+    "order_id": "3698313856",
+    "customer_name": "Julianna Ramirez",
+    "product_name": "Halloween Nail Set + Pink and Black Bandit Themed Nail Set + Pastel Leapord and Zibra Pattern Nail Set",
+    "quantity": 3,
+    "revenue": 102.77
+  },
+  {
+    "sale_date": "2025-05-23",
+    "order_id": "3686502354",
+    "customer_name": "mya",
+    "product_name": "Pink and Black Glitter :3 Cat Nail Set",
+    "quantity": 1,
+    "revenue": 42.63
+  },
+  {
+    "sale_date": "2025-05-06",
+    "order_id": "3672095552",
+    "customer_name": "Caroline Cook",
+    "product_name": "Pink and Black Bladee & Ecco2k Nail Set",
+    "quantity": 1,
+    "revenue": 37.1
+  },
+  {
+    "sale_date": "2025-04-21",
+    "order_id": "3657359888",
+    "customer_name": "Sign in with Apple user",
+    "product_name": "Skull Y2K Pink and Black Nail Set",
+    "quantity": 1,
+    "revenue": 37.89
+  },
+  {
+    "sale_date": "2025-04-18",
+    "order_id": "3654782164",
+    "customer_name": "Bananafishbones",
+    "product_name": "Skull Y2K Pink and Black Nail Set",
+    "quantity": 1,
+    "revenue": 37.45
+  },
+  {
+    "sale_date": "2025-04-04",
+    "order_id": "3642199834",
+    "customer_name": "wiz chan",
+    "product_name": "Pink and Black Bladee & Ecco2k Nail Set",
+    "quantity": 1,
+    "revenue": 38.19
+  },
+  {
+    "sale_date": "2025-03-30",
+    "order_id": "3643742343",
+    "customer_name": "Ronnie",
+    "product_name": "Skull Y2K Pink and Black Nail Set",
+    "quantity": 1,
+    "revenue": 47.64
+  },
+  {
+    "sale_date": "2025-03-26",
+    "order_id": "3633888544",
+    "customer_name": "Julianna Ramirez",
+    "product_name": "Skull Y2K Pink and Black Nail Set",
+    "quantity": 1,
+    "revenue": 38.06
+  },
+  {
+    "sale_date": "2025-03-24",
+    "order_id": "3637699279",
+    "customer_name": "Valentine J",
+    "product_name": "Draculaura Monster High Themed Nail Set + Pink and Brown Rilakkuma Nail Set",
+    "quantity": 2,
+    "revenue": 63.33
+  }
+]
