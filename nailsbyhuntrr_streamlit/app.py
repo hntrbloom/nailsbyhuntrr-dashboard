@@ -316,6 +316,7 @@ def init_db() -> None:
         ensure_bundled_sales(conn)
         ensure_bundled_gel_polish_colors(conn)
         ensure_bundled_filament_colors(conn)
+        ensure_synced_color_catalog(conn)
         ensure_bundled_keychains(conn)
 
 
@@ -618,6 +619,67 @@ def ensure_bundled_filament_colors(conn: sqlite3.Connection) -> None:
             in_stock = excluded.in_stock
         """,
         colors,
+    )
+
+
+def normalize_catalog_type(value: object) -> str:
+    text = str(value or "Gel Polish").strip().lower().replace("-", " ").replace("_", " ")
+    if "filament" in text or "pla" in text:
+        return "filament"
+    return "gel_polish"
+
+
+def normalize_stock_status(color: dict) -> int:
+    if "in_stock" in color:
+        return int(bool(color.get("in_stock")))
+    status = str(color.get("stock_status") or "In Stock").strip().lower()
+    return 0 if status in {"out", "out of stock", "sold out"} else 1
+
+
+def normalize_swatch_id(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return None
+    return text.zfill(2) if text.isdigit() else text
+
+
+def ensure_synced_color_catalog(conn: sqlite3.Connection) -> None:
+    data_path = APP_DIR / "data" / "colors.json"
+    if not data_path.exists():
+        return
+    colors = json.loads(data_path.read_text(encoding="utf-8"))
+    rows = []
+    for color in colors:
+        name = str(color.get("name") or "").strip()
+        hex_code = str(color.get("hex_code") or color.get("hexCode") or color.get("hex") or "").strip()
+        if not name or not hex_code:
+            continue
+        catalog_type = normalize_catalog_type(color.get("catalog_type") or color.get("catalogType"))
+        rows.append(
+            (
+                name,
+                hex_code,
+                str(color.get("finish") or ("PLA" if catalog_type == "filament" else "matte")).strip(),
+                str(color.get("brand") or "").strip() or None,
+                normalize_swatch_id(color.get("swatch_id") or color.get("swatchId")),
+                normalize_stock_status(color),
+                catalog_type,
+            )
+        )
+    conn.executemany(
+        """
+        INSERT INTO colors (name, hex_code, finish, brand, swatch_id, in_stock, catalog_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(name, catalog_type) DO UPDATE SET
+            hex_code = excluded.hex_code,
+            finish = excluded.finish,
+            brand = excluded.brand,
+            swatch_id = excluded.swatch_id,
+            in_stock = excluded.in_stock
+        """,
+        rows,
     )
 
 
