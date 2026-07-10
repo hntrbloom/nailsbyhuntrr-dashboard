@@ -2239,7 +2239,9 @@ def render_about_me() -> None:
                 st.image(str(about_keychains), width="stretch")
         if about_mamegoma.exists():
             with large_col:
-                st.image(str(about_mamegoma), width="stretch")
+                _, mamegoma_col, _ = st.columns([1, 6, 1])
+                with mamegoma_col:
+                    st.image(str(about_mamegoma), width="stretch")
 
 
 def render_etsy_api() -> None:
