@@ -2142,6 +2142,7 @@ def style_page() -> None:
 
 def render_header() -> None:
     st.title("NailsByHuntrr")
+    st.caption("Gel X Press on Nail Sets and 3D Creations")
 
 
 def render_overview() -> None:
