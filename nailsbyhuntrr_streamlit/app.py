@@ -592,20 +592,22 @@ def ensure_bundled_sales(conn: sqlite3.Connection) -> None:
 
 def ensure_bundled_filament_colors(conn: sqlite3.Connection) -> None:
     colors = [
-        ("ZIRO Pastel Purple Matte PLA", "#BDA9F2", "matte PLA", 1, "filament"),
-        ("3DHoJor Matte Green PLA", "#9ED8A6", "matte PLA", 1, "filament"),
-        ("Polymaker Celestial Light Pink PLA", "#F4A8C6", "glitter PLA", 1, "filament"),
-        ("JAYO Pink PLA", "#F2A5C3", "PLA", 1, "filament"),
-        ("PLA+ Matte Ice Blue", "#BFEAF7", "matte PLA", 1, "filament"),
-        ("SUNLU PLA+ 2.0 White", "#F7F7F2", "PLA+", 1, "filament"),
+        ("ZIRO Pastel Purple Matte PLA", "#BDA9F2", "matte PLA", "ZIRO", 1, "filament"),
+        ("3DHoJor Matte Green PLA", "#9ED8A6", "matte PLA", "3DHoJor", 1, "filament"),
+        ("Polymaker Celestial Light Pink PLA", "#F4A8C6", "glitter PLA", "Polymaker", 1, "filament"),
+        ("JAYO Pink PLA", "#F2A5C3", "PLA", "JAYO", 1, "filament"),
+        ("PLA+ Matte Ice Blue", "#BFEAF7", "matte PLA", None, 1, "filament"),
+        ("SUNLU PLA+ 2.0 White", "#F7F7F2", "PLA+", "Sunlu", 1, "filament"),
+        ("SUNLU Clear PLA", "#F3F4EF", "PLA", "Sunlu", 1, "filament"),
     ]
     conn.executemany(
         """
-        INSERT INTO colors (name, hex_code, finish, in_stock, catalog_type)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO colors (name, hex_code, finish, brand, in_stock, catalog_type)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(name, catalog_type) DO UPDATE SET
             hex_code = excluded.hex_code,
             finish = excluded.finish,
+            brand = excluded.brand,
             in_stock = excluded.in_stock
         """,
         colors,
