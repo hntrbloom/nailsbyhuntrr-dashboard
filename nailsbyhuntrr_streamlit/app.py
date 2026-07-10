@@ -2179,6 +2179,9 @@ def render_about_me() -> None:
     about_header = APP_DIR / "assets" / "about" / "about_header_article.jpg"
     about_keychains = APP_DIR / "assets" / "about" / "about_keychains_workspace.jpg"
     about_mamegoma = APP_DIR / "assets" / "about" / "about_mamegoma_closeup.jpg"
+    about_bunny_stand = APP_DIR / "assets" / "about" / "about_3d_printed_bunny_stand.jpg"
+    about_printed_shelf = APP_DIR / "assets" / "about" / "about_3d_printed_shelf.jpg"
+    about_storage = APP_DIR / "assets" / "about" / "about_storage_workspace.jpg"
     business_cards = [card for card in [business_card_front, business_card_back] if card.exists()]
     if business_cards:
         card_cols = st.columns(len(business_cards))
@@ -2233,7 +2236,18 @@ def render_about_me() -> None:
         """,
         unsafe_allow_html=True,
     )
-    if about_keychains.exists() or about_mamegoma.exists():
+    behind_the_scenes = [
+        image
+        for image in [
+            about_keychains,
+            about_mamegoma,
+            about_bunny_stand,
+            about_printed_shelf,
+            about_storage,
+        ]
+        if image.exists()
+    ]
+    if behind_the_scenes:
         st.subheader("Behind the scenes")
         small_col, large_col = st.columns([1, 2])
         if about_keychains.exists():
@@ -2244,6 +2258,18 @@ def render_about_me() -> None:
                 _, mamegoma_col, _ = st.columns([1, 6, 1])
                 with mamegoma_col:
                     st.image(str(about_mamegoma), width="stretch")
+        printed_pieces = [image for image in [about_bunny_stand, about_printed_shelf] if image.exists()]
+        if printed_pieces:
+            st.markdown("**3D printed pieces**")
+            printed_cols = st.columns(len(printed_pieces))
+            for index, image in enumerate(printed_pieces):
+                with printed_cols[index]:
+                    st.image(str(image), width="stretch")
+        if about_storage.exists():
+            st.markdown("**Storage / workspace**")
+            _, storage_col, _ = st.columns([1, 2, 1])
+            with storage_col:
+                st.image(str(about_storage), width="stretch")
 
 
 def render_etsy_api() -> None:
