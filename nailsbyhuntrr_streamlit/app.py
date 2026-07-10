@@ -2172,9 +2172,17 @@ def render_about_me() -> None:
     sales = int(shop_stats.get("sales", 35) or 0)
     favorites = int(shop_stats.get("favorites", 93) or 0)
     location = html.escape(str(shop_stats.get("location", "Des Moines, Iowa")))
+    business_card_front = APP_DIR / "assets" / "about" / "about_business_card_front.jpg"
+    business_card_back = APP_DIR / "assets" / "about" / "about_business_card_back.jpg"
     about_header = APP_DIR / "assets" / "about" / "about_header_article.jpg"
     about_keychains = APP_DIR / "assets" / "about" / "about_keychains_workspace.jpg"
     about_mamegoma = APP_DIR / "assets" / "about" / "about_mamegoma_closeup.jpg"
+    business_cards = [card for card in [business_card_front, business_card_back] if card.exists()]
+    if business_cards:
+        card_cols = st.columns(len(business_cards))
+        for index, card in enumerate(business_cards):
+            with card_cols[index]:
+                st.image(str(card), width="stretch")
     if about_header.exists():
         st.image(str(about_header), width="stretch")
     st.markdown(
