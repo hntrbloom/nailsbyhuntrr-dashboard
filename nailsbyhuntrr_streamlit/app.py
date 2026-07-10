@@ -665,8 +665,8 @@ def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
                 "Plate 4: filament 2 black, 3 gray | total 2.13 m / 6.47 g | 19 changes | cost 0.16\n"
                 "Plate 5: filament 1 white, 2 black, 3 gray | total 2.31 m / 6.99 g | 18 changes | cost 0.17"
             ),
-            "image_url": "assets/keychains/oyasumi_bakura_keychain.png",
-            "image_urls": "assets/keychains/oyasumi_bakura_keychain.png",
+            "image_url": "assets/keychains/oyasumi_bakura_keychain_thumbnail_3mf.png",
+            "image_urls": "assets/keychains/oyasumi_bakura_keychain_thumbnail_3mf.png",
             "model_file_path": "assets/keychains/oyasumi_bakura_keychain.3mf",
             "sku": None,
             "variation_1_name": None,
@@ -693,8 +693,8 @@ def ensure_bundled_keychains(conn: sqlite3.Connection) -> None:
                 "Plate 4: filament 2 black | total 0.10 m / 0.31 g | 0 changes | cost 0.01\n"
                 "Total filament: 10.92 m / 33.08 g | total material cost 0.82"
             ),
-            "image_url": "assets/keychains/mamegoma_baby_keychain_set.jpg",
-            "image_urls": "assets/keychains/mamegoma_baby_keychain_set.jpg",
+            "image_url": "assets/keychains/mamegoma_baby_keychain_set_thumbnail_3mf.png",
+            "image_urls": "assets/keychains/mamegoma_baby_keychain_set_thumbnail_3mf.png",
             "model_file_path": "assets/keychains/mamegoma_baby_keychain_set.3mf",
             "sku": None,
             "variation_1_name": None,
