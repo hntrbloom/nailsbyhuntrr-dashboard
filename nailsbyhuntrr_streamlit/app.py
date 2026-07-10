@@ -76,6 +76,13 @@ def load_shop_stats() -> dict:
     return json.loads(data_path.read_text(encoding="utf-8"))
 
 
+def image_data_uri(path: Path, mime_type: str = "image/jpeg") -> str:
+    if not path.exists():
+        return ""
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -2098,15 +2105,10 @@ def style_page() -> None:
             margin-top: 2.7rem;
         }}
         .about-avatar {{
-            align-items: center;
-            background: linear-gradient(135deg, #ffb7d5, #c7b3e5);
             border-radius: 50%;
-            color: #1b1b1b;
-            display: flex;
             flex: 0 0 62px;
-            font-weight: 800;
             height: 62px;
-            justify-content: center;
+            object-fit: cover;
             width: 62px;
         }}
         .about-member strong {{
@@ -2179,9 +2181,16 @@ def render_about_me() -> None:
     about_header = APP_DIR / "assets" / "about" / "about_header_article.jpg"
     about_keychains = APP_DIR / "assets" / "about" / "about_keychains_workspace.jpg"
     about_mamegoma = APP_DIR / "assets" / "about" / "about_mamegoma_closeup.jpg"
+    about_profile = APP_DIR / "assets" / "about" / "about_hunter_profile.jpg"
     about_bunny_stand = APP_DIR / "assets" / "about" / "about_3d_printed_bunny_stand.jpg"
     about_printed_shelf = APP_DIR / "assets" / "about" / "about_3d_printed_shelf.jpg"
     about_storage = APP_DIR / "assets" / "about" / "about_storage_workspace.jpg"
+    profile_src = image_data_uri(about_profile)
+    profile_html = (
+        f'<img class="about-avatar" src="{profile_src}" alt="Hunter Bloom">'
+        if profile_src
+        else '<div class="about-avatar">HB</div>'
+    )
     business_cards = [card for card in [business_card_front, business_card_back] if card.exists()]
     if business_cards:
         card_cols = st.columns(len(business_cards))
@@ -2223,7 +2232,7 @@ def render_about_me() -> None:
                     and a perfect getaway from the computer.
                 </p>
                 <div class="about-member">
-                    <div class="about-avatar">HB</div>
+                    {profile_html}
                     <div>
                         <h3>Shop members</h3>
                         <strong>Hunter Bloom</strong>
