@@ -2172,6 +2172,10 @@ def render_about_me() -> None:
     sales = int(shop_stats.get("sales", 35) or 0)
     favorites = int(shop_stats.get("favorites", 93) or 0)
     location = html.escape(str(shop_stats.get("location", "Des Moines, Iowa")))
+    about_header = APP_DIR / "assets" / "about" / "about_header_article.jpg"
+    about_keychains = APP_DIR / "assets" / "about" / "about_keychains_workspace.jpg"
+    if about_header.exists():
+        st.image(str(about_header), width="stretch")
     st.markdown(
         f"""
         <div class="about-profile">
@@ -2216,6 +2220,14 @@ def render_about_me() -> None:
         """,
         unsafe_allow_html=True,
     )
+    gallery_images = [about_keychains]
+    existing_gallery_images = [image for image in gallery_images if image.exists()]
+    if existing_gallery_images:
+        st.subheader("Behind the scenes")
+        gallery_cols = st.columns(min(3, len(existing_gallery_images)))
+        for index, image in enumerate(existing_gallery_images):
+            with gallery_cols[index % len(gallery_cols)]:
+                st.image(str(image), width="stretch")
 
 
 def render_etsy_api() -> None:
