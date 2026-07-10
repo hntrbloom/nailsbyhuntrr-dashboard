@@ -3174,6 +3174,23 @@ def render_instagram_collage(media: list[dict]) -> None:
     st.markdown(f"<div class=\"instagram-collage\">{''.join(tiles)}</div>", unsafe_allow_html=True)
 
 
+def render_pinterest() -> None:
+    pinterest_url = "https://pin.it/2jOMW36ir"
+    st.subheader("Pinterest")
+    st.link_button("Open Pinterest board", pinterest_url, width="stretch")
+    components.html(
+        f"""
+        <div style="display:flex; justify-content:center; width:100%;">
+            <a data-pin-do="embedBoard" data-pin-board-width="900" data-pin-scale-height="560"
+               data-pin-scale-width="115" href="{pinterest_url}"></a>
+        </div>
+        <script async defer src="//assets.pinterest.com/js/pinit.js"></script>
+        """,
+        height=650,
+        scrolling=True,
+    )
+
+
 def render_instagram() -> None:
     st.subheader("Instagram")
     st.link_button("Open Instagram profile", "https://www.instagram.com/nailsbyhuntrr/", width="stretch")
@@ -3450,6 +3467,7 @@ def main() -> None:
         revenue,
         orders,
         reviews,
+        pinterest,
         instagram,
         api,
     ) = st.tabs(
@@ -3463,6 +3481,7 @@ def main() -> None:
             "Revenue",
             "Orders",
             "Reviews",
+            "Pinterest",
             "Instagram",
             "API",
         ]
@@ -3485,6 +3504,8 @@ def main() -> None:
         render_orders()
     with reviews:
         render_reviews()
+    with pinterest:
+        render_pinterest()
     with instagram:
         render_instagram()
     with api:
