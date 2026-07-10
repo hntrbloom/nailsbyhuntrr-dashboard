@@ -2184,7 +2184,9 @@ def render_about_me() -> None:
             with card_cols[index]:
                 st.image(str(card), width="stretch")
     if about_header.exists():
-        st.image(str(about_header), width="stretch")
+        _, header_col, _ = st.columns([1, 6, 1])
+        with header_col:
+            st.image(str(about_header), width="stretch")
     st.markdown(
         f"""
         <div class="about-profile">
